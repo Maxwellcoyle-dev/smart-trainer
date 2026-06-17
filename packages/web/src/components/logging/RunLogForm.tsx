@@ -2,76 +2,86 @@ import { useState } from "react";
 import { Field, NumField, RpeSlider, SubmitButton } from "./shared.tsx";
 
 export function RunLogForm() {
-  const [distance, setDistance] = useState("");
+  const [distanceKm, setDistanceKm] = useState("");
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState("");
   const [seconds, setSeconds] = useState("");
-  const [surface, setSurface] = useState<"trail" | "road" | "track" | "treadmill">("road");
+  const [surface, setSurface] = useState<"trail" | "road" | "track" | "treadmill" | "mixed">("road");
+  const [elevGain, setElevGain] = useState("");
   const [rpe, setRpe] = useState<number>(6);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const surfaces = ["road", "trail", "track", "treadmill"] as const;
+  const surfaces = ["road", "trail", "track", "treadmill", "mixed"] as const;
+
+  // Derive pace for live display
+  const distM = parseFloat(distanceKm) * 1000;
+  const durS =
+    (parseInt(hours || "0") * 3600) +
+    (parseInt(minutes || "0") * 60) +
+    parseInt(seconds || "0");
+  const pace = distM && durS ? durS / (distM / 1000) : null;
+  const paceDisplay = pace
+    ? `${Math.floor(pace / 60)}:${String(Math.round(pace % 60)).padStart(2, "0")}/km`
+    : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO: POST /logs/run once backend connected
+    // TODO: POST /logs/run with { distance_m: distM, duration_s: durS, surface, session_rpe: rpe, ... }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <NumField
-        label="Distance (km)"
-        value={distance}
-        onChange={setDistance}
-        placeholder="10.5"
-        step="0.1"
-        min="0"
-      />
+      <div className="grid grid-cols-2 gap-3">
+        <NumField
+          label="Distance (km)"
+          value={distanceKm}
+          onChange={setDistanceKm}
+          placeholder="10.5"
+          step="0.1"
+          min="0"
+        />
+        {paceDisplay && (
+          <div className="flex flex-col justify-end pb-1">
+            <p className="text-xs text-muted uppercase tracking-wider mb-1">Pace</p>
+            <p className="text-lg font-semibold text-accent">{paceDisplay}</p>
+          </div>
+        )}
+      </div>
 
       <div>
         <label className="block text-xs text-muted mb-1 uppercase tracking-wider">Duration</label>
         <div className="flex gap-2">
-          <input
-            type="number"
-            value={hours}
-            onChange={(e) => setHours(e.target.value)}
-            placeholder="0h"
-            min="0"
-            className="w-16 bg-surface2 rounded-xl px-3 py-3 text-center outline-none"
-          />
-          <input
-            type="number"
-            value={minutes}
-            onChange={(e) => setMinutes(e.target.value)}
-            placeholder="42m"
-            min="0"
-            max="59"
-            className="w-16 bg-surface2 rounded-xl px-3 py-3 text-center outline-none"
-          />
-          <input
-            type="number"
-            value={seconds}
-            onChange={(e) => setSeconds(e.target.value)}
-            placeholder="30s"
-            min="0"
-            max="59"
-            className="w-16 bg-surface2 rounded-xl px-3 py-3 text-center outline-none"
-          />
+          {[
+            { value: hours, set: setHours, placeholder: "0h", max: 24 },
+            { value: minutes, set: setMinutes, placeholder: "42m", max: 59 },
+            { value: seconds, set: setSeconds, placeholder: "30s", max: 59 },
+          ].map((f, i) => (
+            <input
+              key={i}
+              type="number"
+              value={f.value}
+              onChange={(e) => f.set(e.target.value)}
+              placeholder={f.placeholder}
+              min="0"
+              max={f.max}
+              className="w-16 bg-surface2 rounded-xl px-3 py-3 text-center outline-none"
+            />
+          ))}
         </div>
       </div>
 
       <div>
         <label className="block text-xs text-muted mb-1 uppercase tracking-wider">Surface</label>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="flex gap-2 flex-wrap">
           {surfaces.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setSurface(s)}
-              className={`py-2 rounded-xl text-sm capitalize font-medium transition-colors ${
+              className={`px-3 py-2 rounded-xl text-sm capitalize font-medium transition-colors ${
                 surface === s ? "bg-accent text-white" : "bg-surface2 text-muted"
               }`}
             >
@@ -80,6 +90,15 @@ export function RunLogForm() {
           ))}
         </div>
       </div>
+
+      <NumField
+        label="Elevation gain (m, optional)"
+        value={elevGain}
+        onChange={setElevGain}
+        placeholder="150"
+        min="0"
+        step="1"
+      />
 
       <RpeSlider value={rpe} onChange={setRpe} />
 

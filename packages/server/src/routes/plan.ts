@@ -1,13 +1,13 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import {
   getCurrentPlan,
   getGoals,
   getWeekSkeleton,
   setWeekSkeleton,
+  SportTypeSchema,
 } from "@smart-trainer/core";
-import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
-import { DayOfWeekSchema, SportSlotSchema } from "@smart-trainer/core";
 
 export const planRouter = new Hono();
 
@@ -24,18 +24,23 @@ planRouter.get("/current", async (c) => {
 planRouter.get("/skeleton", async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const skeleton = await getWeekSkeleton(db, userId);
-  return c.json(skeleton);
+  return c.json(await getWeekSkeleton(db, userId));
 });
 
 const SkeletonBody = z.object({
-  slots: z.record(DayOfWeekSchema, SportSlotSchema.nullable()),
+  name: z.string().optional(),
+  slots: z.array(z.object({
+    day_of_week: z.number().int().min(0).max(6),
+    sport: SportTypeSchema,
+    order_in_day: z.number().int().optional(),
+    hint: z.string().optional().nullable(),
+  })),
 });
 
 planRouter.put("/skeleton", zValidator("json", SkeletonBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const { slots } = c.req.valid("json");
-  const result = await setWeekSkeleton(db, userId, slots);
+  const { name, slots } = c.req.valid("json");
+  const result = await setWeekSkeleton(db, userId, slots, name);
   return c.json(result);
 });

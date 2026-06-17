@@ -8,18 +8,19 @@ import {
   getSessions,
   getInjuryFlags,
   getCheckins,
+  getWeeklyMileage,
 } from "@smart-trainer/core";
 
 export const coachRouter = new Hono();
 
 function buildSystemPrompt(context: Record<string, unknown>): string {
-  return `You are the smart-trainer coach. You have full access to the athlete's training data.
+  return `You are the smart-trainer coach for a runner and climber. You have full access to the athlete's training data.
 
 Current context:
 ${JSON.stringify(context, null, 2)}
 
-You can read training data and propose plan changes. All plan writes go through the proposal queue (mode: propose).
-Be concise, specific, and training-focused. Reference actual numbers from their data.`;
+You can read training data and propose plan changes via tools. All plan writes go through the proposal queue (mode: propose) so the athlete can review before applying.
+Be concise, specific, and data-driven. Reference actual numbers from their data.`;
 }
 
 coachRouter.post("/chat", async (c) => {
@@ -29,11 +30,10 @@ coachRouter.post("/chat", async (c) => {
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Build context for Claude
   const now = new Date().toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400_000).toISOString();
 
-  const [profile, goals, plan, skeleton, sessions, checkins, flags] = await Promise.all([
+  const [profile, goals, plan, skeleton, sessions, checkins, flags, mileage] = await Promise.all([
     getProfile(db, userId).catch(() => null),
     getGoals(db, userId),
     getCurrentPlan(db, userId),
@@ -41,9 +41,19 @@ coachRouter.post("/chat", async (c) => {
     getSessions(db, userId, { from: thirtyDaysAgo, to: now }),
     getCheckins(db, userId, { from: thirtyDaysAgo, to: now }),
     getInjuryFlags(db, userId),
+    getWeeklyMileage(db, userId, 4),
   ]);
 
-  const context = { profile, goals, plan, skeleton, recent_sessions: sessions, recent_checkins: checkins, injury_flags: flags };
+  const context = {
+    profile,
+    goals,
+    plan,
+    skeleton,
+    recent_sessions: sessions,
+    recent_checkins: checkins,
+    injury_flags: flags,
+    weekly_mileage_last4: mileage,
+  };
 
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",

@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { RpeSlider, Field, SubmitButton } from "./shared.tsx";
-
-type Style = "sport" | "boulder" | "tr" | "trad";
+import type { ClimbStyle, ClimbEnvironment } from "@smart-trainer/core";
 
 interface ClimbEntry {
-  grade: string;
-  style: Style;
+  grade_label: string;
+  style: ClimbStyle;
+  environment: ClimbEnvironment;
   attempts: number;
   sends: number;
-  indoor: boolean;
+  route_name: string;
 }
 
-const STYLES: Style[] = ["sport", "boulder", "tr", "trad"];
+const STYLES: ClimbStyle[] = ["sport", "boulder", "top_rope", "trad"];
+const STYLE_LABELS: Record<ClimbStyle, string> = {
+  sport: "Sport", boulder: "Boulder", top_rope: "Top rope", trad: "Trad", auto: "Auto",
+};
 
 function ClimbRow({
   climb,
@@ -27,67 +30,77 @@ function ClimbRow({
       <div className="flex gap-2 items-center">
         <input
           type="text"
-          value={climb.grade}
-          onChange={(e) => onChange({ ...climb, grade: e.target.value })}
-          placeholder="5.11a / V4"
+          value={climb.grade_label}
+          onChange={(e) => onChange({ ...climb, grade_label: e.target.value })}
+          placeholder="5.11a / V4 / 7a"
           className="flex-1 bg-surface rounded-lg px-3 py-2 text-sm outline-none placeholder:text-muted"
         />
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-muted text-lg px-1"
-        >
-          ×
-        </button>
+        <button type="button" onClick={onRemove} className="text-muted text-xl px-1 leading-none">×</button>
       </div>
 
-      <div className="grid grid-cols-4 gap-1">
+      {/* Style */}
+      <div className="flex gap-1">
         {STYLES.map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => onChange({ ...climb, style: s })}
-            className={`py-1.5 rounded-lg text-xs font-medium capitalize ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               climb.style === s ? "bg-accent text-white" : "bg-surface text-muted"
             }`}
           >
-            {s}
+            {STYLE_LABELS[s]}
           </button>
         ))}
       </div>
 
+      {/* Environment + attempts/sends */}
       <div className="flex gap-3 items-center">
-        <div className="flex items-center gap-2 flex-1">
-          <span className="text-xs text-muted">Attempts</span>
-          <button type="button" onClick={() => onChange({ ...climb, attempts: Math.max(1, climb.attempts - 1) })}
-            className="w-8 h-8 rounded-full bg-surface text-lg font-bold flex items-center justify-center">−</button>
-          <span className="w-6 text-center text-sm font-semibold">{climb.attempts}</span>
-          <button type="button" onClick={() => onChange({ ...climb, attempts: climb.attempts + 1 })}
-            className="w-8 h-8 rounded-full bg-surface text-lg font-bold flex items-center justify-center">+</button>
-        </div>
-
-        <div className="flex items-center gap-2 flex-1">
-          <span className="text-xs text-muted">Sends</span>
-          <button type="button" onClick={() => onChange({ ...climb, sends: Math.max(0, climb.sends - 1) })}
-            className="w-8 h-8 rounded-full bg-surface text-lg font-bold flex items-center justify-center">−</button>
-          <span className="w-6 text-center text-sm font-semibold">{climb.sends}</span>
-          <button type="button" onClick={() => onChange({ ...climb, sends: Math.min(climb.attempts, climb.sends + 1) })}
-            className="w-8 h-8 rounded-full bg-surface text-lg font-bold flex items-center justify-center">+</button>
-        </div>
-
         <button
           type="button"
-          onClick={() => onChange({ ...climb, indoor: !climb.indoor })}
-          className={`px-2 py-1 rounded-lg text-xs font-medium ${climb.indoor ? "bg-blue-900 text-blue-300" : "bg-green-900 text-green-300"}`}
+          onClick={() => onChange({ ...climb, environment: climb.environment === "indoor" ? "outdoor" : "indoor" })}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium flex-shrink-0 ${
+            climb.environment === "indoor" ? "bg-blue-900 text-blue-300" : "bg-green-900 text-green-300"
+          }`}
         >
-          {climb.indoor ? "Indoor" : "Outdoor"}
+          {climb.environment === "indoor" ? "Indoor" : "Outdoor"}
         </button>
+
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-muted">Att</span>
+          <button type="button" onClick={() => onChange({ ...climb, attempts: Math.max(1, climb.attempts - 1) })}
+            className="w-7 h-7 rounded-full bg-surface text-sm font-bold flex items-center justify-center">−</button>
+          <span className="w-5 text-center text-sm font-semibold">{climb.attempts}</span>
+          <button type="button" onClick={() => onChange({ ...climb, attempts: climb.attempts + 1 })}
+            className="w-7 h-7 rounded-full bg-surface text-sm font-bold flex items-center justify-center">+</button>
+        </div>
+
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-muted">Sends</span>
+          <button type="button"
+            onClick={() => onChange({ ...climb, sends: Math.max(0, climb.sends - 1) })}
+            className="w-7 h-7 rounded-full bg-surface text-sm font-bold flex items-center justify-center">−</button>
+          <span className="w-5 text-center text-sm font-semibold">{climb.sends}</span>
+          <button type="button"
+            onClick={() => onChange({ ...climb, sends: Math.min(climb.attempts, climb.sends + 1) })}
+            className="w-7 h-7 rounded-full bg-surface text-sm font-bold flex items-center justify-center">+</button>
+        </div>
       </div>
+
+      <input
+        type="text"
+        value={climb.route_name}
+        onChange={(e) => onChange({ ...climb, route_name: e.target.value })}
+        placeholder="Route name (optional)"
+        className="w-full bg-surface rounded-lg px-3 py-1.5 text-sm outline-none placeholder:text-muted"
+      />
     </div>
   );
 }
 
-const newClimb = (): ClimbEntry => ({ grade: "", style: "sport", attempts: 1, sends: 1, indoor: true });
+const newClimb = (): ClimbEntry => ({
+  grade_label: "", style: "sport", environment: "indoor", attempts: 1, sends: 1, route_name: "",
+});
 
 export function ClimbLogForm() {
   const [climbs, setClimbs] = useState<ClimbEntry[]>([newClimb()]);
@@ -99,10 +112,6 @@ export function ClimbLogForm() {
     setClimbs((cs) => cs.map((x, j) => (j === i ? c : x)));
   }
 
-  function removeClimb(i: number) {
-    setClimbs((cs) => cs.filter((_, j) => j !== i));
-  }
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     // TODO: POST /logs/climb
@@ -111,10 +120,10 @@ export function ClimbLogForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className="space-y-3">
       <div className="space-y-2">
         {climbs.map((c, i) => (
-          <ClimbRow key={i} climb={c} onChange={(u) => updateClimb(i, u)} onRemove={() => removeClimb(i)} />
+          <ClimbRow key={i} climb={c} onChange={(u) => updateClimb(i, u)} onRemove={() => setClimbs((cs) => cs.filter((_, j) => j !== i))} />
         ))}
       </div>
 

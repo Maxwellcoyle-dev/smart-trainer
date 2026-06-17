@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { getPendingProposals, getAdaptationLog, resolveProposal } from "@smart-trainer/core";
-import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+import { getPendingProposals, getAdaptationLog, resolveProposal } from "@smart-trainer/core";
 
 export const proposalsRouter = new Hono();
 
@@ -18,13 +18,14 @@ proposalsRouter.get("/history", async (c) => {
   return c.json(await getAdaptationLog(db, userId, limit));
 });
 
-const ResolveBody = z.object({ resolution: z.enum(["approved", "rejected"]) });
+const ResolveBody = z.object({
+  resolution: z.enum(["approved", "rejected"]),
+});
 
 proposalsRouter.post("/:id/resolve", zValidator("json", ResolveBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const proposalId = c.req.param("id");
   const { resolution } = c.req.valid("json");
-  await resolveProposal(db, userId, proposalId, resolution);
+  await resolveProposal(db, userId, c.req.param("id"), resolution);
   return c.json({ ok: true });
 });

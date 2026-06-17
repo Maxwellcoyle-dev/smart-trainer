@@ -1,219 +1,511 @@
 import { z } from "zod";
 
-// ─── Planning side ────────────────────────────────────────────────────────────
+// ─── Enums (mirror 0002_enums.sql) ───────────────────────────────────────────
 
-export const SportSlotSchema = z.enum(["run", "climb", "strength", "rest"]);
-export type SportSlot = z.infer<typeof SportSlotSchema>;
-
-export const DayOfWeekSchema = z.enum([
-  "mon",
-  "tue",
-  "wed",
-  "thu",
-  "fri",
-  "sat",
-  "sun",
+export const SportTypeSchema = z.enum([
+  "run", "climb", "strength", "mobility", "rest", "cross_train",
 ]);
-export type DayOfWeek = z.infer<typeof DayOfWeekSchema>;
+export type SportType = z.infer<typeof SportTypeSchema>;
 
-export const WeekSkeletonSchema = z.object({
+export const SessionSourceSchema = z.enum(["manual", "import", "seed"]);
+export type SessionSource = z.infer<typeof SessionSourceSchema>;
+
+export const PlanStatusSchema = z.enum(["draft", "active", "completed", "abandoned"]);
+export type PlanStatus = z.infer<typeof PlanStatusSchema>;
+
+export const PhaseTypeSchema = z.enum(["base", "build", "peak", "taper", "recovery", "custom"]);
+export type PhaseType = z.infer<typeof PhaseTypeSchema>;
+
+export const PrescribedStatusSchema = z.enum([
+  "planned", "completed", "partial", "skipped", "modified",
+]);
+export type PrescribedStatus = z.infer<typeof PrescribedStatusSchema>;
+
+export const GoalKindSchema = z.enum(["event", "grade", "process", "metric"]);
+export type GoalKind = z.infer<typeof GoalKindSchema>;
+
+export const GoalStatusSchema = z.enum(["active", "achieved", "missed", "abandoned"]);
+export type GoalStatus = z.infer<typeof GoalStatusSchema>;
+
+export const ClimbStyleSchema = z.enum(["sport", "boulder", "top_rope", "trad", "auto"]);
+export type ClimbStyle = z.infer<typeof ClimbStyleSchema>;
+
+export const ClimbEnvironmentSchema = z.enum(["indoor", "outdoor"]);
+export type ClimbEnvironment = z.infer<typeof ClimbEnvironmentSchema>;
+
+export const RunSurfaceSchema = z.enum(["trail", "road", "track", "treadmill", "mixed"]);
+export type RunSurface = z.infer<typeof RunSurfaceSchema>;
+
+export const BodyPartSchema = z.enum([
+  "calf", "achilles", "knee", "shoulder", "elbow", "finger", "wrist", "hip",
+  "ankle", "foot", "hamstring", "quad", "lower_back", "upper_back", "neck", "other",
+]);
+export type BodyPart = z.infer<typeof BodyPartSchema>;
+
+export const BodySideSchema = z.enum(["left", "right", "bilateral", "na"]);
+export type BodySide = z.infer<typeof BodySideSchema>;
+
+export const InjuryStatusSchema = z.enum(["watch", "active", "rehab", "resolved"]);
+export type InjuryStatus = z.infer<typeof InjuryStatusSchema>;
+
+export const WriteSourceSchema = z.enum(["manual", "app_coach", "desktop_mcp", "hook"]);
+export type WriteSource = z.infer<typeof WriteSourceSchema>;
+
+export const ProposalStatusSchema = z.enum([
+  "pending", "approved", "rejected", "superseded", "expired",
+]);
+export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
+
+export const MessageRoleSchema = z.enum(["user", "assistant", "tool", "system"]);
+export type MessageRole = z.infer<typeof MessageRoleSchema>;
+
+export const AiJobStatusSchema = z.enum([
+  "queued", "running", "succeeded", "failed", "skipped",
+]);
+export type AiJobStatus = z.infer<typeof AiJobStatusSchema>;
+
+// ─── Profile ──────────────────────────────────────────────────────────────────
+
+export const ProfileSchema = z.object({
   id: z.string().uuid(),
-  user_id: z.string().uuid(),
-  slots: z.record(DayOfWeekSchema, SportSlotSchema.nullable()),
-  updated_at: z.string().datetime(),
+  display_name: z.string().nullable(),
+  birth_date: z.string().nullable(),
+  height_cm: z.number().nullable(),
+  units: z.string(),
+  injury_history: z.string().nullable(),
+  equipment: z.record(z.string(), z.unknown()),
+  watch_list: z.array(BodyPartSchema),
+  preferences: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
-export type WeekSkeleton = z.infer<typeof WeekSkeletonSchema>;
+export type Profile = z.infer<typeof ProfileSchema>;
+
+// ─── Goals ────────────────────────────────────────────────────────────────────
 
 export const GoalSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
-  type: z.enum(["event", "fitness"]),
-  sport: SportSlotSchema,
-  description: z.string(),
+  kind: GoalKindSchema,
+  sport: SportTypeSchema.nullable(),
+  title: z.string(),
   target_date: z.string().nullable(),
-  target_metric: z.record(z.string(), z.unknown()).nullable(),
-  priority: z.number().int().min(1).max(3),
-  status: z.enum(["active", "achieved", "dropped"]),
-  created_at: z.string().datetime(),
+  target: z.record(z.string(), z.unknown()),
+  priority: z.number().int(),
+  status: GoalStatusSchema,
+  notes: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
-export const PrescribedSessionSchema = z.object({
-  id: z.string().uuid(),
-  week_id: z.string().uuid(),
-  day: DayOfWeekSchema,
-  sport: SportSlotSchema,
-  prescription: z.record(z.string(), z.unknown()),
-  notes: z.string().nullable(),
-});
-export type PrescribedSession = z.infer<typeof PrescribedSessionSchema>;
-
-export const PhaseSchema = z.object({
-  id: z.string().uuid(),
-  plan_id: z.string().uuid(),
-  name: z.string(),
-  type: z.enum(["base", "build", "peak", "recovery"]),
-  start_date: z.string(),
-  end_date: z.string(),
-  notes: z.string().nullable(),
-});
-export type Phase = z.infer<typeof PhaseSchema>;
+// ─── Planning structure ───────────────────────────────────────────────────────
 
 export const PlanSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
   name: z.string(),
-  status: z.enum(["active", "archived"]),
-  created_at: z.string().datetime(),
+  status: PlanStatusSchema,
+  start_date: z.string().nullable(),
+  end_date: z.string().nullable(),
+  intent: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
-// ─── Execution side ───────────────────────────────────────────────────────────
-
-export const RunLogSchema = z.object({
+export const PhaseSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
-  logged_at: z.string().datetime(),
-  distance_km: z.number().positive(),
-  duration_seconds: z.number().int().positive(),
-  pace_per_km: z.number().positive(),
-  surface: z.enum(["trail", "road", "track", "treadmill"]),
-  rpe: z.number().int().min(1).max(10).nullable(),
-  notes: z.string().nullable(),
-  prescribed_session_id: z.string().uuid().nullable(),
+  plan_id: z.string().uuid(),
+  phase_index: z.number().int(),
+  name: z.string(),
+  type: PhaseTypeSchema,
+  intent: z.string().nullable(),
+  start_date: z.string().nullable(),
+  end_date: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
-export type RunLog = z.infer<typeof RunLogSchema>;
+export type Phase = z.infer<typeof PhaseSchema>;
+
+export const PlanWeekSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  phase_id: z.string().uuid(),
+  week_index: z.number().int(),
+  start_date: z.string().nullable(),
+  theme: z.string().nullable(),
+  targets: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
+});
+export type PlanWeek = z.infer<typeof PlanWeekSchema>;
+
+export const PrescribedSessionSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  plan_week_id: z.string().uuid(),
+  day_of_week: z.number().int().min(0).max(6),
+  scheduled_date: z.string().nullable(),
+  sport: SportTypeSchema,
+  order_in_day: z.number().int(),
+  prescription: z.record(z.string(), z.unknown()),
+  status: PrescribedStatusSchema,
+  logged_session_id: z.string().uuid().nullable(),
+  injury_flag_id: z.string().uuid().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
+});
+export type PrescribedSession = z.infer<typeof PrescribedSessionSchema>;
+
+// ─── Week skeleton ────────────────────────────────────────────────────────────
+
+export const WeekSkeletonSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  name: z.string(),
+  is_active: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
+});
+export type WeekSkeleton = z.infer<typeof WeekSkeletonSchema>;
+
+export const SkeletonSlotSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  skeleton_id: z.string().uuid(),
+  day_of_week: z.number().int().min(0).max(6),
+  sport: SportTypeSchema,
+  order_in_day: z.number().int(),
+  hint: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type SkeletonSlot = z.infer<typeof SkeletonSlotSchema>;
+
+// ─── Reference tables ─────────────────────────────────────────────────────────
+
+export const GradeSchema = z.object({
+  id: z.string().uuid(),
+  system: z.string(),
+  label: z.string(),
+  grade_value: z.number().int(),
+  discipline: z.string(),
+});
+export type Grade = z.infer<typeof GradeSchema>;
+
+export const ExerciseSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  name: z.string(),
+  category: z.string().nullable(),
+  cues: z.string().nullable(),
+  target_tissue: z.array(BodyPartSchema),
+  is_seed: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
+});
+export type Exercise = z.infer<typeof ExerciseSchema>;
+
+// ─── Sessions (execution side) ────────────────────────────────────────────────
+
+export const SessionSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  sport: SportTypeSchema,
+  occurred_at: z.string(),
+  duration_s: z.number().int().nullable(),
+  session_rpe: z.number().int().min(1).max(10).nullable(),
+  location: z.string().nullable(),
+  notes: z.string().nullable(),
+  source: SessionSourceSchema,
+  prescribed_session_id: z.string().uuid().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
+});
+export type Session = z.infer<typeof SessionSchema>;
+
+export const RunDetailsSchema = z.object({
+  session_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  distance_m: z.number().int().positive(),   // meters
+  surface: RunSurfaceSchema,
+  elevation_gain_m: z.number().int().nullable(),
+  avg_hr: z.number().int().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type RunDetails = z.infer<typeof RunDetailsSchema>;
 
 export const ClimbSchema = z.object({
   id: z.string().uuid(),
+  user_id: z.string().uuid(),
   session_id: z.string().uuid(),
-  grade: z.string(),
-  style: z.enum(["sport", "boulder", "tr", "trad"]),
+  grade_id: z.string().uuid().nullable(),
+  grade_label: z.string().nullable(),
+  grade_value: z.number().int().nullable(),
+  style: ClimbStyleSchema,
+  environment: ClimbEnvironmentSchema,
   attempts: z.number().int().min(1),
   sends: z.number().int().min(0),
-  indoor: z.boolean(),
   route_name: z.string().nullable(),
+  crag: z.string().nullable(),
+  order_in_session: z.number().int(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
 export type Climb = z.infer<typeof ClimbSchema>;
 
-export const ClimbSessionSchema = z.object({
+export const StrengthSetSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
-  logged_at: z.string().datetime(),
+  session_id: z.string().uuid(),
+  exercise_id: z.string().uuid().nullable(),
+  exercise_name: z.string().nullable(),
+  set_index: z.number().int(),
+  reps: z.number().int().nullable(),
+  weight_kg: z.number().nullable(),
   rpe: z.number().int().min(1).max(10).nullable(),
-  notes: z.string().nullable(),
-  prescribed_session_id: z.string().uuid().nullable(),
-  climbs: z.array(ClimbSchema),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
-export type ClimbSession = z.infer<typeof ClimbSessionSchema>;
+export type StrengthSet = z.infer<typeof StrengthSetSchema>;
 
-export const SetSchema = z.object({
-  id: z.string().uuid(),
-  log_id: z.string().uuid(),
-  exercise: z.string(),
-  reps: z.number().int().positive(),
-  weight_kg: z.number().nonnegative().nullable(),
-  rpe: z.number().int().min(1).max(10).nullable(),
-});
-export type Set = z.infer<typeof SetSchema>;
-
-export const StrengthLogSchema = z.object({
-  id: z.string().uuid(),
-  user_id: z.string().uuid(),
-  logged_at: z.string().datetime(),
-  notes: z.string().nullable(),
-  prescribed_session_id: z.string().uuid().nullable(),
-  sets: z.array(SetSchema),
-});
-export type StrengthLog = z.infer<typeof StrengthLogSchema>;
-
-export const BodyPartSchema = z.enum([
-  "calf",
-  "knee",
-  "shoulder",
-  "hip",
-  "ankle",
-  "back",
-  "elbow",
-  "wrist",
-]);
-export type BodyPart = z.infer<typeof BodyPartSchema>;
+// ─── Wellness ─────────────────────────────────────────────────────────────────
 
 export const CheckInSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
-  logged_at: z.string().datetime(),
-  sleep_hours: z.number().min(0).max(24).nullable(),
-  soreness: z.record(BodyPartSchema, z.number().int().min(0).max(5)),
-  bodyweight_kg: z.number().positive().nullable(),
+  check_in_date: z.string(),
+  sleep_hours: z.number().nullable(),
+  sleep_quality: z.number().int().min(1).max(5).nullable(),
+  bodyweight_kg: z.number().nullable(),
   mood: z.number().int().min(1).max(5).nullable(),
-  readiness: z.number().int().min(1).max(5).nullable(),
+  readiness: z.number().int().min(1).max(10).nullable(),
   notes: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
 export type CheckIn = z.infer<typeof CheckInSchema>;
+
+export const SorenessEntrySchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  check_in_id: z.string().uuid(),
+  body_part: BodyPartSchema,
+  side: BodySideSchema,
+  severity: z.number().int().min(0).max(10),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type SorenessEntry = z.infer<typeof SorenessEntrySchema>;
 
 export const InjuryFlagSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
   body_part: BodyPartSchema,
-  status: z.enum(["monitoring", "active", "resolved"]),
-  notes: z.string().nullable(),
-  created_at: z.string().datetime(),
-  updated_at: z.string().datetime(),
+  side: BodySideSchema,
+  status: InjuryStatusSchema,
+  severity: z.number().int().min(0).max(10).nullable(),
+  onset_date: z.string(),
+  resolved_date: z.string().nullable(),
+  narrative: z.string().nullable(),
+  origin: WriteSourceSchema,
+  created_at: z.string(),
+  updated_at: z.string(),
+  deleted_at: z.string().nullable(),
 });
 export type InjuryFlag = z.infer<typeof InjuryFlagSchema>;
 
-// ─── Audit ────────────────────────────────────────────────────────────────────
+// ─── AI & Audit ───────────────────────────────────────────────────────────────
 
-export const AdaptationLogSchema = z.object({
-  id: z.string().uuid(),
-  user_id: z.string().uuid(),
-  source: z.enum(["app-coach", "desktop-mcp", "manual"]),
-  action: z.string(),
-  diff: z.record(z.string(), z.unknown()),
-  rationale: z.string().nullable(),
-  status: z.enum(["proposed", "approved", "rejected", "applied"]),
-  created_at: z.string().datetime(),
-  resolved_at: z.string().datetime().nullable(),
+export const AdaptationDiffSchema = z.object({
+  entity_type: z.string(),
+  entity_id: z.string().uuid().nullable(),
+  op: z.enum(["create", "update", "delete", "replace_subtree"]),
+  before: z.record(z.string(), z.unknown()).nullable(),
+  after: z.record(z.string(), z.unknown()).nullable(),
+  fields: z.array(z.string()),
 });
-export type AdaptationLog = z.infer<typeof AdaptationLogSchema>;
-
-// ─── Proposal queue ───────────────────────────────────────────────────────────
+export type AdaptationDiff = z.infer<typeof AdaptationDiffSchema>;
 
 export const ProposalSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
-  source: z.enum(["app-coach", "desktop-mcp"]),
-  action: z.string(),
-  payload: z.record(z.string(), z.unknown()),
+  source: WriteSourceSchema,
+  action_type: z.string(),
+  diff: AdaptationDiffSchema,
   rationale: z.string().nullable(),
-  status: z.enum(["pending", "approved", "rejected"]),
-  created_at: z.string().datetime(),
+  status: ProposalStatusSchema,
+  thread_id: z.string().uuid().nullable(),
+  job_run_id: z.string().uuid().nullable(),
+  expires_at: z.string().nullable(),
+  resolved_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 
-// ─── Metrics (derived, computed server-side) ──────────────────────────────────
+export const AdaptationLogSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  source: WriteSourceSchema,
+  action_type: z.string(),
+  diff: AdaptationDiffSchema,
+  rationale: z.string().nullable(),
+  proposal_id: z.string().uuid().nullable(),
+  thread_id: z.string().uuid().nullable(),
+  job_run_id: z.string().uuid().nullable(),
+  reverts_log_id: z.string().uuid().nullable(),
+  reverted_at: z.string().nullable(),
+  applied_at: z.string(),
+  created_at: z.string(),
+});
+export type AdaptationLog = z.infer<typeof AdaptationLogSchema>;
 
-export interface WeeklyMetrics {
+export const CoachMessageSchema = z.object({
+  id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  thread_id: z.string().uuid(),
+  role: MessageRoleSchema,
+  content: z.string().nullable(),
+  tool_calls: z.array(z.unknown()),
+  model: z.string().nullable(),
+  input_tokens: z.number().int().nullable(),
+  output_tokens: z.number().int().nullable(),
+  created_at: z.string(),
+});
+export type CoachMessage = z.infer<typeof CoachMessageSchema>;
+
+// ─── Derived / computed types (views) ─────────────────────────────────────────
+
+export interface WeeklyMileage {
+  user_id: string;
   week_start: string;
-  run_km: number;
-  run_km_prev: number;
-  ramp_pct: number;
-  climb_sessions: number;
-  strength_sessions: number;
-  prescribed_sessions: number;
-  completed_sessions: number;
+  distance_m: number;
+  n_runs: number;
+  prev_distance_m: number | null;
+  ramp_pct: number | null;
+}
+
+export interface GradePyramidRow {
+  user_id: string;
+  environment: ClimbEnvironment;
+  discipline: string | null;
+  grade_value: number;
+  grade_label: string;
+  sends: number;
+  attempt_rows: number;
+  month: string;
+}
+
+export interface AdherenceRow {
+  user_id: string;
+  plan_week_id: string;
+  start_date: string;
+  prescribed: number;
+  completed: number;
+  skipped: number;
   adherence_pct: number;
 }
 
-export interface GradePyramidEntry {
-  grade: string;
-  style: string;
-  sends: number;
-  attempts: number;
+export interface SorenessTrendRow {
+  user_id: string;
+  body_part: BodyPart;
+  side: BodySide;
+  check_in_date: string;
+  severity: number;
 }
 
-export interface SorenessTrend {
-  body_part: BodyPart;
-  readings: { date: string; score: number }[];
+// ─── Composite input types (used by logging forms + action layer) ─────────────
+
+export interface LogRunInput {
+  occurred_at: string;
+  duration_s: number;
+  distance_m: number;          // meters
+  surface: RunSurface;
+  elevation_gain_m?: number | null;
+  session_rpe?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  prescribed_session_id?: string | null;
 }
+
+export interface ClimbInput {
+  grade_label: string;
+  grade_value?: number | null;
+  grade_id?: string | null;
+  style: ClimbStyle;
+  environment: ClimbEnvironment;
+  attempts: number;
+  sends: number;
+  route_name?: string | null;
+  crag?: string | null;
+  order_in_session?: number;
+}
+
+export interface LogClimbSessionInput {
+  occurred_at: string;
+  duration_s?: number | null;
+  session_rpe?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  prescribed_session_id?: string | null;
+  climbs: ClimbInput[];
+}
+
+export interface StrengthSetInput {
+  exercise_id?: string | null;
+  exercise_name: string;
+  set_index: number;
+  reps?: number | null;
+  weight_kg?: number | null;
+  rpe?: number | null;
+}
+
+export interface LogStrengthInput {
+  occurred_at: string;
+  duration_s?: number | null;
+  session_rpe?: number | null;
+  notes?: string | null;
+  prescribed_session_id?: string | null;
+  sets: StrengthSetInput[];
+}
+
+export interface SorenessInput {
+  body_part: BodyPart;
+  side?: BodySide;
+  severity: number;
+}
+
+export interface LogCheckInInput {
+  check_in_date: string;
+  sleep_hours?: number | null;
+  sleep_quality?: number | null;
+  bodyweight_kg?: number | null;
+  mood?: number | null;
+  readiness?: number | null;
+  notes?: string | null;
+  soreness: SorenessInput[];
+}
+
+export interface SkeletonSlotInput {
+  day_of_week: number;  // 0 = Mon
+  sport: SportType;
+  order_in_day?: number;
+  hint?: string | null;
+}
+
+export type WriteMode = "apply" | "propose";

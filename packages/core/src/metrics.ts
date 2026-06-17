@@ -1,51 +1,90 @@
-import type { RunLog, GradePyramidEntry, ClimbSession, SorenessTrend, CheckIn, BodyPart, WeeklyMetrics } from "./types.js";
+// Client-side metric helpers (complement the SQL views for cases where
+// the view data needs further processing in TypeScript).
 
-export function computeWeeklyRunMetrics(
-  currentWeekRuns: RunLog[],
-  prevWeekRuns: RunLog[]
-): Pick<WeeklyMetrics, "run_km" | "run_km_prev" | "ramp_pct"> {
-  const run_km = currentWeekRuns.reduce((s, r) => s + r.distance_km, 0);
-  const run_km_prev = prevWeekRuns.reduce((s, r) => s + r.distance_km, 0);
-  const ramp_pct = run_km_prev === 0 ? 0 : ((run_km - run_km_prev) / run_km_prev) * 100;
-  return { run_km, run_km_prev, ramp_pct };
-}
+import type {
+  WeeklyMileage,
+  GradePyramidRow,
+  SorenessTrendRow,
+  BodyPart,
+} from "./types.js";
 
-export function buildGradePyramid(sessions: ClimbSession[]): GradePyramidEntry[] {
-  const map = new Map<string, GradePyramidEntry>();
+/** Group grade pyramid rows by environment and grade_value, summing sends. */
+export function aggregatePyramid(
+  rows: GradePyramidRow[]
+): Map<string, { grade_label: string; grade_value: number; sends: number; attempts: number }[]> {
+  const byEnv = new Map<string, Map<number, { grade_label: string; grade_value: number; sends: number; attempts: number }>>();
 
-  for (const session of sessions) {
-    for (const climb of session.climbs) {
-      const key = `${climb.grade}:${climb.style}`;
-      const existing = map.get(key) ?? { grade: climb.grade, style: climb.style, sends: 0, attempts: 0 };
-      existing.sends += climb.sends;
-      existing.attempts += climb.attempts;
-      map.set(key, existing);
-    }
+  for (const row of rows) {
+    const env = `${row.environment}:${row.discipline ?? "rope"}`;
+    if (!byEnv.has(env)) byEnv.set(env, new Map());
+    const envMap = byEnv.get(env)!;
+    const existing = envMap.get(row.grade_value) ?? {
+      grade_label: row.grade_label,
+      grade_value: row.grade_value,
+      sends: 0,
+      attempts: 0,
+    };
+    existing.sends += row.sends;
+    existing.attempts += row.attempt_rows;
+    envMap.set(row.grade_value, existing);
   }
 
-  return [...map.values()].sort((a, b) => a.grade.localeCompare(b.grade));
-}
-
-export function buildSorenessTrends(checkins: CheckIn[]): SorenessTrend[] {
-  const bodyParts = new Set<BodyPart>();
-  for (const c of checkins) {
-    for (const part of Object.keys(c.soreness) as BodyPart[]) {
-      bodyParts.add(part);
-    }
+  const result = new Map<string, { grade_label: string; grade_value: number; sends: number; attempts: number }[]>();
+  for (const [env, envMap] of byEnv) {
+    result.set(env, [...envMap.values()].sort((a, b) => a.grade_value - b.grade_value));
   }
-
-  return [...bodyParts].map((body_part) => ({
-    body_part,
-    readings: checkins
-      .filter((c) => body_part in c.soreness)
-      .map((c) => ({
-        date: c.logged_at.slice(0, 10),
-        score: c.soreness[body_part] ?? 0,
-      })),
-  }));
+  return result;
 }
 
-export function computeAdherence(prescribed: number, completed: number): number {
-  if (prescribed === 0) return 100;
-  return Math.round((completed / prescribed) * 100);
+/** Return mileage in km for display (storage is meters). */
+export function metersToKm(m: number): number {
+  return Math.round((m / 1000) * 10) / 10;
+}
+
+/** Format pace as mm:ss/km from distance_m + duration_s. */
+export function formatPace(distance_m: number, duration_s: number): string {
+  if (!distance_m || !duration_s) return "—";
+  const pace_s_per_km = duration_s / (distance_m / 1000);
+  const mins = Math.floor(pace_s_per_km / 60);
+  const secs = Math.round(pace_s_per_km % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}/km`;
+}
+
+/** Format duration seconds as h:mm or mm:ss. */
+export function formatDuration(s: number): string {
+  if (s >= 3600) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${h}h ${m}m`;
+  }
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+/** Compute ramp % for display from two mileage values. */
+export function rampDisplay(current_m: number, prev_m: number | null): string {
+  if (!prev_m) return "—";
+  const pct = ((current_m - prev_m) / prev_m) * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(0)}%`;
+}
+
+/** Group soreness trend rows by body part. */
+export function groupSorenessByPart(
+  rows: SorenessTrendRow[]
+): Map<BodyPart, { date: string; severity: number }[]> {
+  const map = new Map<BodyPart, { date: string; severity: number }[]>();
+  for (const row of rows) {
+    const arr = map.get(row.body_part) ?? [];
+    arr.push({ date: row.check_in_date, severity: row.severity });
+    map.set(row.body_part, arr);
+  }
+  return map;
+}
+
+/** Latest mileage week from the view results. */
+export function latestWeek(rows: WeeklyMileage[]): WeeklyMileage | null {
+  if (!rows.length) return null;
+  return rows[rows.length - 1];
 }

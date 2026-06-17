@@ -1,70 +1,39 @@
 import { Hono } from "hono";
 import {
-  getSessions,
-  getCheckins,
-  computeWeeklyRunMetrics,
-  buildGradePyramid,
-  buildSorenessTrends,
+  getWeeklyMileage,
+  getGradePyramid,
+  getSorenessTrend,
+  getAdherence,
+  aggregatePyramid,
 } from "@smart-trainer/core";
 
 export const metricsRouter = new Hono();
 
-function weekBounds(date: Date): { from: string; to: string } {
-  const d = new Date(date);
-  const day = d.getDay();
-  const monday = new Date(d);
-  monday.setDate(d.getDate() - ((day + 6) % 7));
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  return {
-    from: monday.toISOString(),
-    to: sunday.toISOString(),
-  };
-}
-
-metricsRouter.get("/weekly", async (c) => {
+metricsRouter.get("/weekly-mileage", async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-
-  const now = new Date();
-  const thisWeek = weekBounds(now);
-  const lastWeekDate = new Date(now);
-  lastWeekDate.setDate(now.getDate() - 7);
-  const lastWeek = weekBounds(lastWeekDate);
-
-  const [current, prev] = await Promise.all([
-    getSessions(db, userId, thisWeek),
-    getSessions(db, userId, lastWeek),
-  ]);
-
-  const runMetrics = computeWeeklyRunMetrics(current.runs, prev.runs);
-
-  return c.json({
-    ...runMetrics,
-    climb_sessions: current.climbs.length,
-    strength_sessions: current.strength.length,
-    week_start: thisWeek.from,
-  });
+  const weeks = parseInt(c.req.query("weeks") ?? "12", 10);
+  return c.json(await getWeeklyMileage(db, userId, weeks));
 });
 
 metricsRouter.get("/grade-pyramid", async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const days = parseInt(c.req.query("days") ?? "90", 10);
-  const from = new Date(Date.now() - days * 86400_000).toISOString();
-  const to = new Date().toISOString();
-  const sessions = await getSessions(db, userId, { from, to, sport: "climb" });
-  return c.json(buildGradePyramid(sessions.climbs));
+  const months = parseInt(c.req.query("months") ?? "3", 10);
+  const environment = c.req.query("environment");
+  const rows = await getGradePyramid(db, userId, { months, environment });
+  return c.json({ rows, aggregated: Object.fromEntries(aggregatePyramid(rows)) });
 });
 
-metricsRouter.get("/soreness-trends", async (c) => {
+metricsRouter.get("/soreness-trend", async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
   const days = parseInt(c.req.query("days") ?? "30", 10);
-  const from = new Date(Date.now() - days * 86400_000).toISOString();
-  const to = new Date().toISOString();
-  const checkins = await getCheckins(db, userId, { from, to });
-  return c.json(buildSorenessTrends(checkins));
+  return c.json(await getSorenessTrend(db, userId, days));
+});
+
+metricsRouter.get("/adherence", async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  return c.json(await getAdherence(db, userId));
 });
