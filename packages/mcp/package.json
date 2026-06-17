@@ -1,0 +1,25 @@
+{
+  "name": "@smart-trainer/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "smart-trainer-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@smart-trainer/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.17.0",
+    "@types/node": "^22.0.0"
+  }
+}
