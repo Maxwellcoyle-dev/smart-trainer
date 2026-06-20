@@ -15,9 +15,16 @@ import type {
   Climb,
   CheckIn,
   SorenessEntry,
+  InjuryFlag,
   WeekSkeleton,
   SkeletonSlot,
 } from "../types.js";
+import { getProfile } from "./reads.js";
+
+// ─── Injury-flag policy ───────────────────────────────────────────────────────
+
+/** Soreness severity at or above this value auto-opens/updates an injury_flag. */
+export const SORENESS_FLAG_THRESHOLD = 5;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -305,6 +312,7 @@ export interface LogCheckInResult {
   mode: WriteMode;
   check_in?: CheckIn & { soreness_entries: SorenessEntry[] };
   proposal?: Proposal;
+  raised_flags?: InjuryFlag[];
 }
 
 export async function logCheckIn(
@@ -365,7 +373,89 @@ export async function logCheckIn(
     entries = data ?? [];
   }
 
-  return { mode: "apply", check_in: { ...ci, soreness_entries: entries } };
+  // ── Auto-flag pass (apply mode only) ─────────────────────────────────────
+
+  // Scope: watch_list from profile; empty list → all body parts in scope.
+  const profile = await getProfile(db, userId);
+  const watchList: string[] = profile?.watch_list ?? [];
+
+  // Fetch existing open flags once so we can match without extra round-trips.
+  const { data: openFlags, error: flagFetchErr } = await db
+    .from("injury_flags")
+    .select("*")
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .neq("status", "resolved");
+  if (flagFetchErr) throw flagFetchErr;
+
+  const raisedFlags: InjuryFlag[] = [];
+
+  for (const entry of entries) {
+    // Only process parts that are in scope and meet the severity threshold.
+    const inScope = watchList.length === 0 || watchList.includes(entry.body_part);
+    if (!inScope || entry.severity < SORENESS_FLAG_THRESHOLD) continue;
+
+    const existing = (openFlags ?? []).find(
+      (f) => f.body_part === entry.body_part && f.side === entry.side
+    );
+
+    if (existing) {
+      // Update: take max severity, append dated note to narrative.
+      const newSeverity = Math.max(existing.severity ?? 0, entry.severity);
+      const note = `\n[${input.check_in_date}] check-in soreness ${entry.severity}/10`;
+      const { data: updated, error: updErr } = await db
+        .from("injury_flags")
+        .update({
+          severity: newSeverity,
+          narrative: (existing.narrative ?? "") + note,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      raisedFlags.push(updated as InjuryFlag);
+    } else {
+      // Insert: new flag at 'watch' status.
+      const { data: inserted, error: insErr } = await db
+        .from("injury_flags")
+        .insert({
+          user_id: userId,
+          body_part: entry.body_part,
+          side: entry.side,
+          status: "watch",
+          severity: entry.severity,
+          onset_date: input.check_in_date,
+          origin: source,
+          narrative: `Auto-raised from check-in ${input.check_in_date} — ${entry.body_part} soreness ${entry.severity}/10`,
+        })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      raisedFlags.push(inserted as InjuryFlag);
+    }
+  }
+
+  // Audit: one adaptation_log entry for the check-in (flags included in after).
+  await appendAdaptationLog(
+    db,
+    userId,
+    source,
+    "log_check_in",
+    {
+      entity_type: "check_in+soreness_entries",
+      entity_id: ci.id,
+      op: "create",
+      before: null,
+      after: {
+        check_in_id: ci.id,
+        raised_flag_ids: raisedFlags.map((f) => f.id),
+      },
+      fields: ["check_in_date", "soreness"],
+    },
+    null
+  );
+
+  return { mode: "apply", check_in: { ...ci, soreness_entries: entries }, raised_flags: raisedFlags };
 }
 
 // ─── Week skeleton ────────────────────────────────────────────────────────────
