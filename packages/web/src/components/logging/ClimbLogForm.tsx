@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RpeSlider, Field, SubmitButton } from "./shared.tsx";
 import type { ClimbStyle, ClimbEnvironment } from "@smart-trainer/core";
+import { useLogClimb } from "../../lib/hooks.ts";
 
 interface ClimbEntry {
   grade_label: string;
@@ -103,6 +104,7 @@ const newClimb = (): ClimbEntry => ({
 });
 
 export function ClimbLogForm() {
+  const logClimb = useLogClimb();
   const [climbs, setClimbs] = useState<ClimbEntry[]>([newClimb()]);
   const [rpe, setRpe] = useState(6);
   const [notes, setNotes] = useState("");
@@ -114,9 +116,32 @@ export function ClimbLogForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO: POST /logs/climb
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    const valid = climbs.filter((c) => c.grade_label.trim());
+    if (valid.length === 0) return;
+    logClimb.mutate(
+      {
+        occurred_at: new Date().toISOString(),
+        session_rpe: rpe,
+        notes: notes.trim() || null,
+        climbs: valid.map((c, i) => ({
+          grade_label: c.grade_label.trim(),
+          style: c.style,
+          environment: c.environment,
+          attempts: c.attempts,
+          sends: c.sends,
+          route_name: c.route_name.trim() || null,
+          order_in_session: i,
+        })),
+      },
+      {
+        onSuccess: () => {
+          setSaved(true);
+          setClimbs([newClimb()]);
+          setNotes("");
+          setTimeout(() => setSaved(false), 2000);
+        },
+      }
+    );
   }
 
   return (
@@ -137,7 +162,12 @@ export function ClimbLogForm() {
 
       <RpeSlider value={rpe} onChange={setRpe} />
       <Field label="Notes (optional)" value={notes} onChange={setNotes} multiline placeholder="Worked the crux on the 5.12b…" />
-      <SubmitButton saved={saved} label="Log session" />
+      <SubmitButton
+        saved={saved}
+        label="Log session"
+        pending={logClimb.isPending}
+        error={logClimb.isError ? (logClimb.error as Error).message : null}
+      />
     </form>
   );
 }

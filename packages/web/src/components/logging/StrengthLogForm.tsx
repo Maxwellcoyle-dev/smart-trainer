@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Field, SubmitButton } from "./shared.tsx";
+import { useLogStrength } from "../../lib/hooks.ts";
 
 interface SetEntry {
   exercise: string;
@@ -80,6 +81,7 @@ function SetRow({
 const newSet = (): SetEntry => ({ exercise: "", reps: 10, weight_kg: null, rpe: null });
 
 export function StrengthLogForm() {
+  const logStrength = useLogStrength();
   const [sets, setSets] = useState<SetEntry[]>([newSet()]);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
@@ -90,9 +92,29 @@ export function StrengthLogForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO: POST /logs/strength
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    const valid = sets.filter((s) => s.exercise.trim());
+    if (valid.length === 0) return;
+    logStrength.mutate(
+      {
+        occurred_at: new Date().toISOString(),
+        notes: notes.trim() || null,
+        sets: valid.map((s, i) => ({
+          exercise_name: s.exercise.trim(),
+          set_index: i,
+          reps: s.reps,
+          weight_kg: s.weight_kg,
+          rpe: s.rpe,
+        })),
+      },
+      {
+        onSuccess: () => {
+          setSaved(true);
+          setSets([newSet()]);
+          setNotes("");
+          setTimeout(() => setSaved(false), 2000);
+        },
+      }
+    );
   }
 
   return (
@@ -112,7 +134,12 @@ export function StrengthLogForm() {
       </button>
 
       <Field label="Notes (optional)" value={notes} onChange={setNotes} multiline placeholder="Focused on slow eccentrics…" />
-      <SubmitButton saved={saved} label="Log session" />
+      <SubmitButton
+        saved={saved}
+        label="Log session"
+        pending={logStrength.isPending}
+        error={logStrength.isError ? (logStrength.error as Error).message : null}
+      />
     </form>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Field, NumField, SubmitButton } from "./shared.tsx";
 import type { BodyPart } from "@smart-trainer/core";
+import { useLogCheckIn } from "../../lib/hooks.ts";
 
 // Watchlist body parts shown by default; can expand later
 const WATCH_PARTS: BodyPart[] = ["calf", "achilles", "knee", "shoulder", "elbow", "finger", "hip", "ankle"];
@@ -55,12 +56,30 @@ export function CheckInForm() {
   );
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
+  const logCheckIn = useLogCheckIn();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO: POST /logs/checkin with soreness as array of { body_part, severity }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    logCheckIn.mutate(
+      {
+        check_in_date: new Date().toISOString().slice(0, 10),
+        sleep_hours: sleep ? parseFloat(sleep) : null,
+        sleep_quality: sleepQuality,
+        bodyweight_kg: weight ? parseFloat(weight) : null,
+        mood,
+        readiness,
+        notes: notes.trim() || null,
+        soreness: (Object.entries(soreness) as [BodyPart, number][])
+          .filter(([, v]) => v > 0)
+          .map(([body_part, severity]) => ({ body_part, severity })),
+      },
+      {
+        onSuccess: () => {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        },
+      }
+    );
   }
 
   return (
@@ -119,7 +138,12 @@ export function CheckInForm() {
       </div>
 
       <Field label="Notes (optional)" value={notes} onChange={setNotes} multiline placeholder="Knee felt a bit stiff on the stairs…" />
-      <SubmitButton saved={saved} label="Log check-in" />
+      <SubmitButton
+        saved={saved}
+        label="Log check-in"
+        pending={logCheckIn.isPending}
+        error={logCheckIn.isError ? (logCheckIn.error as Error).message : null}
+      />
     </form>
   );
 }

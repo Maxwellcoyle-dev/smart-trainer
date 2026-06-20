@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Field, NumField, RpeSlider, SubmitButton } from "./shared.tsx";
+import { useLogRun } from "../../lib/hooks.ts";
 
 export function RunLogForm() {
+  const logRun = useLogRun();
   const [distanceKm, setDistanceKm] = useState("");
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState("");
@@ -25,11 +27,36 @@ export function RunLogForm() {
     ? `${Math.floor(pace / 60)}:${String(Math.round(pace % 60)).padStart(2, "0")}/km`
     : null;
 
+  function resetForm() {
+    setDistanceKm("");
+    setHours("");
+    setMinutes("");
+    setSeconds("");
+    setElevGain("");
+    setNotes("");
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO: POST /logs/run with { distance_m: distM, duration_s: durS, surface, session_rpe: rpe, ... }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (!(distM > 0) || !(durS > 0)) return;
+    logRun.mutate(
+      {
+        occurred_at: new Date().toISOString(),
+        distance_m: Math.round(distM),
+        duration_s: durS,
+        surface,
+        elevation_gain_m: elevGain ? Math.round(parseFloat(elevGain)) : null,
+        session_rpe: rpe,
+        notes: notes.trim() || null,
+      },
+      {
+        onSuccess: () => {
+          setSaved(true);
+          resetForm();
+          setTimeout(() => setSaved(false), 2000);
+        },
+      }
+    );
   }
 
   return (
@@ -104,7 +131,12 @@ export function RunLogForm() {
 
       <Field label="Notes (optional)" value={notes} onChange={setNotes} multiline placeholder="Felt strong on the hills…" />
 
-      <SubmitButton saved={saved} label="Log run" />
+      <SubmitButton
+        saved={saved}
+        label="Log run"
+        pending={logRun.isPending}
+        error={logRun.isError ? (logRun.error as Error).message : null}
+      />
     </form>
   );
 }
