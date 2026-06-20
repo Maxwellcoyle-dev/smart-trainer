@@ -8,10 +8,24 @@ import {
   setWeekSkeleton,
   fillWeek,
   adjustSession,
+  createPlan,
   SportTypeSchema,
 } from "@smart-trainer/core";
 
 export const planRouter = new Hono();
+
+const CreatePlanBody = z.object({
+  name: z.string().min(1),
+  start_date: z.string(),            // YYYY-MM-DD
+  n_weeks: z.number().int().min(1).max(52),
+  intent: z.string().optional().nullable(),
+});
+
+planRouter.post("/create", zValidator("json", CreatePlanBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  return c.json(await createPlan(db, userId, c.req.valid("json")), 201);
+});
 
 planRouter.get("/current", async (c) => {
   const db = c.get("supabase");

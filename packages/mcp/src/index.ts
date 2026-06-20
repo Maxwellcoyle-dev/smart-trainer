@@ -18,6 +18,7 @@ import {
   getSorenessTrend,
   getAdherence,
   setWeekSkeleton,
+  createPlan,
   fillWeek,
   adjustSession,
   undoAdaptation,
@@ -206,6 +207,21 @@ server.tool(
   async ({ proposal_id, resolution }) => {
     const result = await resolveProposal(db, USER_ID, proposal_id, resolution);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_plan",
+  "Scaffold a new active training plan: one phase + N empty weekly slots (Mondays from start_date). Gives fill_week a target. Marks any prior active plan completed.",
+  {
+    name: z.string(),
+    start_date: z.string().describe("YYYY-MM-DD, ideally a Monday"),
+    n_weeks: z.number().int().min(1).max(52),
+    intent: z.string().optional().nullable(),
+  },
+  async ({ name, start_date, n_weeks, intent }) => {
+    const data = await createPlan(db, USER_ID, { name, start_date, n_weeks, intent: intent ?? null }, "desktop_mcp");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
 

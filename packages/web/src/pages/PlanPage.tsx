@@ -1,6 +1,23 @@
 import { useEffect, useState } from "react";
 import type { SportType } from "@smart-trainer/core";
-import { useSkeleton, useSaveSkeleton, usePendingProposals, useResolveProposal } from "../lib/hooks.ts";
+import {
+  useSkeleton,
+  useSaveSkeleton,
+  usePendingProposals,
+  useResolveProposal,
+  useCurrentPlan,
+  useCreatePlan,
+  useFillWeek,
+} from "../lib/hooks.ts";
+
+/** Next Monday in YYYY-MM-DD (sensible default plan start). */
+function nextMonday(): string {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  const add = ((8 - day) % 7) || 7;
+  d.setDate(d.getDate() + add);
+  return d.toISOString().slice(0, 10);
+}
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -23,6 +40,24 @@ export function PlanPage() {
   const saveSkeleton = useSaveSkeleton();
   const { data: proposals } = usePendingProposals();
   const resolveProposal = useResolveProposal();
+  const { data: planData } = useCurrentPlan();
+  const createPlan = useCreatePlan();
+  const fillWeek = useFillWeek();
+
+  const plan = planData?.plan ?? null;
+  const planWeeks = plan?.phases?.flatMap((ph) => ph.plan_weeks) ?? [];
+
+  const [planName, setPlanName] = useState("");
+  const [planWeeksCount, setPlanWeeksCount] = useState("8");
+
+  function submitPlan() {
+    const name = planName.trim() || "Training plan";
+    const n = Math.max(1, parseInt(planWeeksCount || "8", 10));
+    createPlan.mutate(
+      { name, start_date: nextMonday(), n_weeks: n },
+      { onSuccess: () => setPlanName("") }
+    );
+  }
 
   // day_of_week → sport (null = rest/empty)
   const [slots, setSlots] = useState<(SportType | null)[]>(Array(7).fill(null));
@@ -120,10 +155,80 @@ export function PlanPage() {
         </button>
       </div>
 
-      {/* Goals placeholder */}
+      {/* Current plan */}
       <div className="bg-surface rounded-2xl p-4">
-        <p className="text-muted text-xs uppercase tracking-wider mb-2">Goals</p>
-        <p className="text-muted text-sm">Goal management coming next</p>
+        <p className="text-muted text-xs uppercase tracking-wider mb-3">Current plan</p>
+
+        {!plan ? (
+          <div className="space-y-3">
+            <p className="text-muted text-sm">No active plan. Create one to schedule weeks and fill them from your skeleton.</p>
+            <input
+              type="text"
+              value={planName}
+              onChange={(e) => setPlanName(e.target.value)}
+              placeholder="Plan name (e.g. Fall trail half)"
+              className="w-full bg-surface2 rounded-xl px-4 py-3 text-sm outline-none placeholder:text-muted"
+            />
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-muted">Weeks</label>
+              <input
+                type="number"
+                min="1"
+                max="52"
+                value={planWeeksCount}
+                onChange={(e) => setPlanWeeksCount(e.target.value)}
+                className="w-20 bg-surface2 rounded-xl px-3 py-2 text-sm outline-none"
+              />
+              <span className="text-xs text-muted">starts {nextMonday()}</span>
+            </div>
+            {createPlan.isError && (
+              <p className="text-danger text-sm">{(createPlan.error as Error).message}</p>
+            )}
+            <button
+              disabled={createPlan.isPending}
+              onClick={submitPlan}
+              className="w-full py-3 rounded-xl bg-accent text-white font-semibold disabled:opacity-50 active:opacity-80"
+            >
+              {createPlan.isPending ? "Creating…" : "Create plan"}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">{plan.name}</p>
+            <p className="text-muted text-xs">
+              {planWeeks.length} weeks{plan.start_date ? ` · from ${plan.start_date}` : ""}
+            </p>
+            <div className="space-y-2 pt-1">
+              {planWeeks
+                .sort((a, b) => a.week_index - b.week_index)
+                .map((w) => {
+                  const filling = fillWeek.isPending && fillWeek.variables === w.id;
+                  return (
+                    <div key={w.id} className="flex items-center gap-3 bg-surface2 rounded-xl px-3 py-2">
+                      <span className="text-sm flex-1">
+                        Week {w.week_index + 1}
+                        {w.start_date ? <span className="text-muted"> · {w.start_date}</span> : null}
+                        <span className="text-muted"> · {w.prescribed_sessions.length} sessions</span>
+                      </span>
+                      <button
+                        disabled={filling}
+                        onClick={() => fillWeek.mutate(w.id)}
+                        className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50 active:opacity-80"
+                      >
+                        {filling ? "…" : "Fill from skeleton"}
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+            {fillWeek.isError && (
+              <p className="text-danger text-sm">{(fillWeek.error as Error).message}</p>
+            )}
+            <p className="text-muted text-xs pt-1">
+              "Fill from skeleton" proposes the week's sessions — approve them below.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Pending proposals */}

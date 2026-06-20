@@ -761,3 +761,112 @@ export async function adjustSession(
   const logId = await appendAdaptationLog(db, userId, source, "adjust_session", diffs, rationale);
   return { mode: "apply", log_id: logId };
 }
+
+// ─── create_plan (scaffold a plan → phase → weeks) ────────────────────────────
+
+export interface CreatePlanInput {
+  name: string;
+  start_date: string;   // ISO date (YYYY-MM-DD); ideally a Monday
+  n_weeks: number;      // number of plan_weeks to scaffold
+  intent?: string | null;
+}
+
+export interface CreatePlanResult {
+  plan_id: string;
+  phase_id: string;
+  plan_week_ids: string[];
+  log_id: string;
+}
+
+/**
+ * Scaffold an active plan with one phase and `n_weeks` empty plan_weeks (Mondays
+ * stepping weekly from start_date). This gives `fill_week` and the coach a target
+ * to write prescribed sessions into. Any previously-active plan is marked
+ * 'completed' so the "current plan" stays singular (getCurrentPlan uses single()).
+ * Manual user action → direct apply + audit log.
+ */
+export async function createPlan(
+  db: SupabaseClient,
+  userId: string,
+  input: CreatePlanInput,
+  source: WriteSource = "manual"
+): Promise<CreatePlanResult> {
+  const nWeeks = Math.max(1, Math.floor(input.n_weeks));
+
+  const start = new Date(input.start_date + "T00:00:00Z");
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + nWeeks * 7 - 1);
+  const endDate = end.toISOString().slice(0, 10);
+
+  // Keep "current plan" singular.
+  await db
+    .from("plans")
+    .update({ status: "completed" })
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  const { data: plan, error: planErr } = await db
+    .from("plans")
+    .insert({
+      user_id: userId,
+      name: input.name,
+      status: "active",
+      start_date: input.start_date,
+      end_date: endDate,
+      intent: input.intent ?? null,
+    })
+    .select("id")
+    .single();
+  if (planErr) throw planErr;
+
+  const { data: phase, error: phaseErr } = await db
+    .from("phases")
+    .insert({
+      user_id: userId,
+      plan_id: plan.id,
+      phase_index: 0,
+      name: "Block 1",
+      type: "base",
+      intent: input.intent ?? null,
+      start_date: input.start_date,
+      end_date: endDate,
+    })
+    .select("id")
+    .single();
+  if (phaseErr) throw phaseErr;
+
+  const weekRows = Array.from({ length: nWeeks }, (_, i) => {
+    const ws = new Date(start);
+    ws.setUTCDate(ws.getUTCDate() + i * 7);
+    return {
+      user_id: userId,
+      phase_id: phase.id,
+      week_index: i,
+      start_date: ws.toISOString().slice(0, 10),
+    };
+  });
+  const { data: weeks, error: weekErr } = await db
+    .from("plan_weeks")
+    .insert(weekRows)
+    .select("id");
+  if (weekErr) throw weekErr;
+  const planWeekIds = (weeks ?? []).map((w) => (w as { id: string }).id);
+
+  const logId = await appendAdaptationLog(
+    db,
+    userId,
+    source,
+    "create_plan",
+    {
+      entity_type: "plans",
+      entity_id: plan.id,
+      op: "create",
+      before: null,
+      after: { plan_id: plan.id, phase_id: phase.id, n_weeks: nWeeks },
+      fields: ["name", "start_date", "end_date"],
+    },
+    `Created plan "${input.name}" (${nWeeks} weeks)`
+  );
+
+  return { plan_id: plan.id, phase_id: phase.id, plan_week_ids: planWeekIds, log_id: logId };
+}

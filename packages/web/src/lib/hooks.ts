@@ -216,10 +216,52 @@ export function useResolveProposal() {
   });
 }
 
+export interface PlanWeek {
+  id: string;
+  week_index: number;
+  start_date: string | null;
+  prescribed_sessions: { id: string; sport: string; day_of_week: number; status: string }[];
+}
+export interface Phase {
+  id: string;
+  name: string;
+  type: string;
+  plan_weeks: PlanWeek[];
+}
+export interface CurrentPlan {
+  id: string;
+  name: string;
+  status: string;
+  start_date: string | null;
+  end_date: string | null;
+  phases: Phase[];
+}
+
 export function useCurrentPlan() {
   return useQuery({
     queryKey: ["plan", "current"],
-    queryFn: () => api.get<{ plan: unknown; goals: unknown[] }>("/plan/current"),
+    queryFn: () => api.get<{ plan: CurrentPlan | null; goals: unknown[] }>("/plan/current"),
+  });
+}
+
+export function useCreatePlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; start_date: string; n_weeks: number; intent?: string | null }) =>
+      api.post("/plan/create", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
+  });
+}
+
+export function useFillWeek() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (planWeekId: string) =>
+      api.post("/plan/fill-week", { plan_week_id: planWeekId, mode: "propose" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["proposals"] });
+      qc.invalidateQueries({ queryKey: ["plan"] });
+    },
   });
 }
 
