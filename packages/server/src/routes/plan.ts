@@ -6,6 +6,8 @@ import {
   getGoals,
   getWeekSkeleton,
   setWeekSkeleton,
+  fillWeek,
+  adjustSession,
   SportTypeSchema,
 } from "@smart-trainer/core";
 
@@ -43,4 +45,34 @@ planRouter.put("/skeleton", zValidator("json", SkeletonBody), async (c) => {
   const { name, slots } = c.req.valid("json");
   const result = await setWeekSkeleton(db, userId, slots, name);
   return c.json(result);
+});
+
+// Expand the active skeleton into prescribed sessions for a plan week.
+// In-app default is 'propose' → lands in the approval queue.
+const FillWeekBody = z.object({
+  plan_week_id: z.string().uuid(),
+  mode: z.enum(["propose", "apply"]).optional().default("propose"),
+});
+
+planRouter.post("/fill-week", zValidator("json", FillWeekBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const { plan_week_id, mode } = c.req.valid("json");
+  return c.json(await fillWeek(db, userId, plan_week_id, mode, "app_coach"));
+});
+
+const AdjustSessionBody = z.object({
+  prescribed_session_id: z.string().uuid(),
+  changes: z.record(z.string(), z.unknown()),
+  mode: z.enum(["propose", "apply"]).optional().default("propose"),
+  rationale: z.string().optional().nullable(),
+});
+
+planRouter.post("/adjust-session", zValidator("json", AdjustSessionBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const { prescribed_session_id, changes, mode, rationale } = c.req.valid("json");
+  return c.json(
+    await adjustSession(db, userId, prescribed_session_id, changes, mode, "app_coach", rationale ?? null)
+  );
 });

@@ -18,6 +18,9 @@ import {
   getSorenessTrend,
   getAdherence,
   setWeekSkeleton,
+  fillWeek,
+  adjustSession,
+  undoAdaptation,
   logRun,
   logClimbSession,
   logStrength,
@@ -195,14 +198,54 @@ server.tool(
 
 server.tool(
   "resolve_proposal",
-  "Approve or reject a pending plan-change proposal",
+  "Approve or reject a pending plan-change proposal. Approving applies the change and records it in the adaptation log.",
   {
     proposal_id: z.string().uuid(),
     resolution: z.enum(["approved", "rejected"]),
   },
   async ({ proposal_id, resolution }) => {
-    await resolveProposal(db, USER_ID, proposal_id, resolution);
-    return { content: [{ type: "text", text: `Proposal ${proposal_id} ${resolution}.` }] };
+    const result = await resolveProposal(db, USER_ID, proposal_id, resolution);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "fill_week",
+  "Expand the active week skeleton into prescribed sessions for a plan week. Desktop default is 'apply' (direct); use 'propose' to route through the approval queue.",
+  {
+    plan_week_id: z.string().uuid(),
+    mode: z.enum(["apply", "propose"]).optional().default("apply"),
+  },
+  async ({ plan_week_id, mode }) => {
+    const data = await fillWeek(db, USER_ID, plan_week_id, mode, "desktop_mcp");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "adjust_session",
+  "Edit a single prescribed session (e.g. scale load, change sport, swap prescription). `changes` is a partial set of prescribed_sessions columns. Desktop default is 'apply'.",
+  {
+    prescribed_session_id: z.string().uuid(),
+    changes: z.record(z.string(), z.unknown()),
+    mode: z.enum(["apply", "propose"]).optional().default("apply"),
+    rationale: z.string().optional().nullable(),
+  },
+  async ({ prescribed_session_id, changes, mode, rationale }) => {
+    const data = await adjustSession(
+      db, USER_ID, prescribed_session_id, changes, mode, "desktop_mcp", rationale ?? null
+    );
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "undo_adaptation",
+  "Undo a previously applied change by its adaptation_logs id. Applies the inverse and records the undo in the ledger.",
+  { log_id: z.string().uuid() },
+  async ({ log_id }) => {
+    const data = await undoAdaptation(db, USER_ID, log_id);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );
 
