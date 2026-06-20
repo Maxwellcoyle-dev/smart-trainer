@@ -26,5 +26,14 @@ export const getSupabase = createMiddleware(async (c, next) => {
     }
   }
 
-  await next();
+  // Health check stays public; all other routes require an authenticated user.
+  if (c.req.path === "/health") {
+    return next();
+  }
+
+  if (!c.get("userId")) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  return next();
 });

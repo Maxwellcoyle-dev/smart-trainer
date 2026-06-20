@@ -4,3 +4,4 @@ export * from "./metrics.js";
 export * from "./actions/reads.js";
 export * from "./actions/writes.js";
 export * from "./actions/apply.js";
+export { shouldRaiseFlag } from "./actions/policy.js";
