@@ -4,6 +4,7 @@ import type {
   GradePyramidRow,
   SorenessTrendRow,
   AdherenceRow,
+  Proposal,
 } from "@smart-trainer/core";
 import { api } from "./api.ts";
 
@@ -171,6 +172,48 @@ export interface InjuryFlag {
   status: string;
   severity: number | null;
   narrative: string | null;
+}
+
+export interface LatestCheckin {
+  check_in_date: string;
+  readiness: number | null;
+  mood: number | null;
+  sleep_hours: number | null;
+  soreness_entries: { body_part: string; side?: string; severity: number }[];
+}
+
+export function useInjuryFlags() {
+  return useQuery({
+    queryKey: ["wellness", "injury-flags"],
+    queryFn: () => api.get<InjuryFlag[]>("/wellness/injury-flags"),
+  });
+}
+
+export function useLatestCheckin() {
+  return useQuery({
+    queryKey: ["home", "latest-checkin"],
+    queryFn: () => api.get<LatestCheckin | null>("/wellness/latest-checkin"),
+  });
+}
+
+export function usePendingProposals() {
+  return useQuery({
+    queryKey: ["proposals"],
+    queryFn: () => api.get<Proposal[]>("/proposals"),
+  });
+}
+
+export function useResolveProposal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, resolution }: { id: string; resolution: "approved" | "rejected" }) =>
+      api.post(`/proposals/${id}/resolve`, { resolution }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["proposals"] });
+      qc.invalidateQueries({ queryKey: ["plan"] });
+      qc.invalidateQueries({ queryKey: ["metrics"] });
+    },
+  });
 }
 
 export function useCurrentPlan() {

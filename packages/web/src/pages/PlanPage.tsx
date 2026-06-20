@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SportType } from "@smart-trainer/core";
-import { useSkeleton, useSaveSkeleton } from "../lib/hooks.ts";
+import { useSkeleton, useSaveSkeleton, usePendingProposals, useResolveProposal } from "../lib/hooks.ts";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -21,6 +21,8 @@ interface SlotDraft {
 export function PlanPage() {
   const { data: skeleton } = useSkeleton();
   const saveSkeleton = useSaveSkeleton();
+  const { data: proposals } = usePendingProposals();
+  const resolveProposal = useResolveProposal();
 
   // day_of_week → sport (null = rest/empty)
   const [slots, setSlots] = useState<(SportType | null)[]>(Array(7).fill(null));
@@ -124,10 +126,54 @@ export function PlanPage() {
         <p className="text-muted text-sm">Goal management coming next</p>
       </div>
 
-      {/* Proposals placeholder */}
+      {/* Pending proposals */}
       <div className="bg-surface rounded-2xl p-4">
-        <p className="text-muted text-xs uppercase tracking-wider mb-2">Pending proposals</p>
-        <p className="text-muted text-sm">No pending proposals</p>
+        <p className="text-muted text-xs uppercase tracking-wider mb-3">Pending proposals</p>
+        {!proposals || proposals.length === 0 ? (
+          <p className="text-muted text-sm">No pending proposals</p>
+        ) : (
+          <div className="space-y-3">
+            {proposals.map((p) => {
+              const diff = p.diff as { entity_type?: string; op?: string; fields?: string[] } | null;
+              const summary = diff
+                ? [diff.op, diff.entity_type, (diff.fields ?? []).join(", ")]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null;
+              const isLoading = resolveProposal.isPending && resolveProposal.variables?.id === p.id;
+              return (
+                <div key={p.id} className="bg-surface2 rounded-xl p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-medium">{p.action_type}</span>
+                    {summary && <span className="text-muted text-xs">{summary}</span>}
+                  </div>
+                  {p.rationale && (
+                    <p className="text-muted text-xs leading-relaxed">{p.rationale}</p>
+                  )}
+                  {resolveProposal.isError && resolveProposal.variables?.id === p.id && (
+                    <p className="text-danger text-xs">{(resolveProposal.error as Error).message}</p>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      disabled={isLoading}
+                      onClick={() => resolveProposal.mutate({ id: p.id, resolution: "approved" })}
+                      className="flex-1 py-2 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50 active:opacity-80"
+                    >
+                      {isLoading ? "…" : "Approve"}
+                    </button>
+                    <button
+                      disabled={isLoading}
+                      onClick={() => resolveProposal.mutate({ id: p.id, resolution: "rejected" })}
+                      className="flex-1 py-2 rounded-lg bg-surface text-sm font-semibold border border-border disabled:opacity-50 active:opacity-80"
+                    >
+                      {isLoading ? "…" : "Reject"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
