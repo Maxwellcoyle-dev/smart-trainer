@@ -70,3 +70,45 @@ The PM (the orchestrating Claude) curates a backlog and will validate your work.
 2. Commit on `feat/injury-flag-loop` with a clear message that references **P9**.
 
 The PM will read that Result section, validate the change, and update the Build Log / Open Proposals in the project brief accordingly.
+
+---
+
+## Result (P9 — completed 2026-06-20)
+
+**Branch:** `feat/injury-flag-loop`  
+**Commit:** `9bdbb97`
+
+### What changed
+
+Only `packages/core/src/actions/writes.ts` was edited:
+
+1. **`SORENESS_FLAG_THRESHOLD = 5`** exported as a named constant at the top of the file.
+2. **`InjuryFlag` imported** from `../types.js`; **`getProfile` imported** from `./reads.js`.
+3. **`LogCheckInResult`** extended with optional `raised_flags?: InjuryFlag[]`.
+4. **Auto-flag pass** added after soreness entries are written (apply mode only — propose path is unchanged):
+   - Reads `profile.watch_list`; if empty, all body parts are in scope (so the loop works before a watch-list is configured).
+   - Fetches all open flags (`deleted_at is null`, `status <> 'resolved'`) in one query.
+   - For each soreness entry in scope with `severity >= 5`: finds existing open flag by `body_part + side` → updates `severity = max(existing, new)` and appends `[date] check-in soreness N/10` to `narrative`; if no match → inserts new flag with `status: 'watch'`, `onset_date: check_in_date`, `origin: source`.
+   - Appends one `adaptation_log` entry (`action_type: 'log_check_in'`) with `after: { check_in_id, raised_flag_ids }`.
+   - Returns `raised_flags` alongside existing `mode` / `check_in` fields.
+
+### Threshold / scope policy
+
+- Threshold: `severity >= 5` (mid-range; conservative enough to avoid noise on mild DOMS).
+- Scope: `watch_list` if non-empty; otherwise all parts — so the loop is useful even before the user configures a watch-list.
+- Re-logging the same day re-evaluates but cannot create duplicate flags (existence check prevents it).
+- Auto-resolve on zero severity: deliberately NOT implemented per spec.
+
+### Verification
+
+```
+pnpm --filter @smart-trainer/core build   # exit 0 ✅
+cd packages/core && npx tsc --noEmit      # (same tsc, exit 0 ✅)
+```
+
+No DB round-trip test added — logic verified via typecheck + review. A pure unit test for the scope/threshold predicate would be a good follow-up (P9-bis).
+
+### Left out / PM check
+
+- No auto-resolve on soreness drop (separate concern, spec deferred).
+- `getProfile` returns `null` if profile not found — the code treats `null` as empty watch-list (all parts in scope), which is safe but means flags will fire even for a brand-new user. PM should confirm this is acceptable or add a guard.
