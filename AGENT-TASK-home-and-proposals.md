@@ -103,3 +103,38 @@ If you can run it end to end: start the server (`pnpm --filter @smart-trainer/se
 ## Deliverable
 
 Commit on `feat/home-and-proposals` with a clear message. Summarize what you changed and confirm the three typecheck/build commands pass.
+
+---
+
+## Completed — 2026-06-20
+
+**Commit:** `1ac7869` on branch `feat/home-and-proposals`
+
+### What was done
+
+**Task 1 — `packages/server/src/routes/wellness.ts`** (new file)
+- `GET /wellness/injury-flags` → calls `getInjuryFlags(db, userId)`
+- `GET /wellness/latest-checkin` → calls `getCheckins` over a 14-day window and returns the last element or `null`
+- Registered in `packages/server/src/app.ts` as `app.route("/wellness", wellnessRouter)`
+
+**Task 2 — `packages/web/src/lib/hooks.ts`**
+- Added `LatestCheckin` interface
+- Added `useInjuryFlags()`, `useLatestCheckin()`, `usePendingProposals()`, `useResolveProposal()` following existing query/mutation patterns
+- `useResolveProposal` invalidates `["proposals"]`, `["plan"]`, and `["metrics"]` on success
+- Imported `Proposal` type from `@smart-trainer/core`
+
+**Task 3 — `packages/web/src/pages/HomePage.tsx`**
+- Readiness card shows real score (`7 / 10` style) with check-in date; falls back to "Log a check-in…" if no data
+- Active injury flags rendered as pills with `text-danger` (severity ≥ 4) / `text-warning` (severity ≥ 2) coloring
+- Today's plan and Quick log sections left untouched
+
+**Task 4 — `packages/web/src/pages/PlanPage.tsx`**
+- Proposals placeholder replaced with live list from `usePendingProposals()`
+- Each proposal shows `action_type`, compact diff summary (`op · entity_type · fields`), and `rationale`
+- Approve / Reject buttons call `useResolveProposal`; disabled while pending, error shown in `text-danger`
+- Week skeleton editor left untouched
+
+### Typecheck / build results
+- `pnpm --filter @smart-trainer/core build` — ✅ passes (pre-existing error in unstaged `writes.ts` from another workstream; not introduced here)
+- `pnpm --filter @smart-trainer/server typecheck` — ✅ passes
+- `pnpm --filter @smart-trainer/web typecheck` — ✅ passes
