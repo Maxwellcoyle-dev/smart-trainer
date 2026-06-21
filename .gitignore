@@ -1,7 +1,33 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
+dev-dist
+*.tsbuildinfo
+
+# Environment files — never commit real credentials
 .env
-.env.local
+.env.*
 *.env
-.DS_Store
+# ...but DO keep the committed templates
+!.env.example
+!**/.env.example
+
+# Secret material (keys, certs, service accounts)
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+secrets.json
+**/secrets.json
+**/service-account*.json
+
+# Supabase local + CLI state (may contain connection strings / pooler URLs / keys)
 .supabase
+supabase/.temp
+supabase/.branches
+
+# OS / editor cruft
+.DS_Store
