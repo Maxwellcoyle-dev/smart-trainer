@@ -1,5 +1,11 @@
 import { SupabaseClient } from "../db.js";
 import { applyDiff, invertDiff } from "./apply.js";
+import {
+  SORENESS_RESOLVE_THRESHOLD,
+  RESOLVE_AFTER_CLEAR_CHECKINS,
+  recoveryProgress,
+  stepFlagDown,
+} from "./policy.js";
 import type {
   WriteMode,
   WriteSource,
@@ -316,6 +322,8 @@ export interface LogCheckInResult {
   check_in?: CheckIn & { soreness_entries: SorenessEntry[] };
   proposal?: Proposal;
   raised_flags?: InjuryFlag[];
+  resolved_flags?: InjuryFlag[];
+  downgraded_flags?: InjuryFlag[];
 }
 
 export async function logCheckIn(
@@ -438,6 +446,74 @@ export async function logCheckIn(
     }
   }
 
+  // ── Recovery pass ────────────────────────────────────────────────────────
+  // Only run on flags that were NOT raised/escalated by the raise pass above,
+  // so we never both raise and resolve the same (body_part, side) in one check-in.
+  const raisedKeys = new Set(raisedFlags.map((f) => `${f.body_part}:${f.side}`));
+
+  const resolvedFlags: InjuryFlag[] = [];
+  const downgradedFlags: InjuryFlag[] = [];
+
+  const candidateFlags = (openFlags ?? []).filter(
+    (f) => !raisedKeys.has(`${f.body_part}:${f.side}`)
+  );
+
+  for (const flag of candidateFlags) {
+    // Fetch the last RESOLVE_AFTER_CLEAR_CHECKINS soreness entries for this
+    // (body_part, side), ordered newest-first. Missing rows mean severity 0.
+    const { data: recentRows, error: recentErr } = await db
+      .from("soreness_entries")
+      .select("severity, check_ins!inner(user_id, check_in_date)")
+      .eq("check_ins.user_id", userId)
+      .eq("body_part", flag.body_part)
+      .eq("side", flag.side)
+      .order("check_in_date", { referencedTable: "check_ins", ascending: false })
+      .limit(RESOLVE_AFTER_CLEAR_CHECKINS);
+    if (recentErr) throw recentErr;
+
+    // Build the severity array newest-first. Count check-ins in the window
+    // that have no entry at all as clear (severity 0). We know the current
+    // check-in is included if a soreness entry exists; if the part wasn't
+    // mentioned this check-in, it is implicitly clear and we insert a 0.
+    const severities: number[] = (recentRows ?? []).map(
+      (r) => (r as { severity: number }).severity
+    );
+    // If the current check-in had no soreness entry for this part, prepend 0.
+    const currentEntryExists = entries.some(
+      (e) => e.body_part === flag.body_part && e.side === flag.side
+    );
+    if (!currentEntryExists) {
+      severities.unshift(0);
+    }
+
+    const progress = recoveryProgress(severities, SORENESS_RESOLVE_THRESHOLD, RESOLVE_AFTER_CLEAR_CHECKINS);
+    if (progress < RESOLVE_AFTER_CLEAR_CHECKINS) continue;
+
+    const { status: newStatus, resolved_date } = stepFlagDown(flag.status, input.check_in_date);
+    const direction = `${flag.status}→${newStatus}`;
+    const note = `\n[${input.check_in_date}] cleared ${RESOLVE_AFTER_CLEAR_CHECKINS} check-ins — ${direction}`;
+
+    const updatePayload: Record<string, unknown> = {
+      status: newStatus,
+      narrative: (flag.narrative ?? "") + note,
+    };
+    if (resolved_date) updatePayload.resolved_date = resolved_date;
+
+    const { data: updated, error: updErr } = await db
+      .from("injury_flags")
+      .update(updatePayload)
+      .eq("id", flag.id)
+      .select()
+      .single();
+    if (updErr) throw updErr;
+
+    if (newStatus === "resolved") {
+      resolvedFlags.push(updated as InjuryFlag);
+    } else {
+      downgradedFlags.push(updated as InjuryFlag);
+    }
+  }
+
   // Audit: one adaptation_log entry for the check-in (flags included in after).
   await appendAdaptationLog(
     db,
@@ -452,13 +528,21 @@ export async function logCheckIn(
       after: {
         check_in_id: ci.id,
         raised_flag_ids: raisedFlags.map((f) => f.id),
+        resolved_flag_ids: resolvedFlags.map((f) => f.id),
+        downgraded_flag_ids: downgradedFlags.map((f) => f.id),
       },
       fields: ["check_in_date", "soreness"],
     },
     null
   );
 
-  return { mode: "apply", check_in: { ...ci, soreness_entries: entries }, raised_flags: raisedFlags };
+  return {
+    mode: "apply",
+    check_in: { ...ci, soreness_entries: entries },
+    raised_flags: raisedFlags,
+    resolved_flags: resolvedFlags,
+    downgraded_flags: downgradedFlags,
+  };
 }
 
 // ─── Week skeleton ────────────────────────────────────────────────────────────
