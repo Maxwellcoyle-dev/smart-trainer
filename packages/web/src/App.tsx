@@ -5,8 +5,24 @@ import { LogPage } from "./pages/LogPage.tsx";
 import { ProgressPage } from "./pages/ProgressPage.tsx";
 import { PlanPage } from "./pages/PlanPage.tsx";
 import { CoachPage } from "./pages/CoachPage.tsx";
+import { useAuth } from "./auth/AuthProvider.tsx";
+import { LoginScreen } from "./auth/LoginScreen.tsx";
 
 export default function App() {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted text-sm">
+        Loading…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
   return (
     <div className="flex flex-col h-full">
       <main className="flex-1 overflow-y-auto pb-16">

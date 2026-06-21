@@ -6,6 +6,7 @@ import { metricsRouter } from "./routes/metrics.js";
 import { planRouter } from "./routes/plan.js";
 import { coachRouter } from "./routes/coach.js";
 import { proposalsRouter } from "./routes/proposals.js";
+import { wellnessRouter } from "./routes/wellness.js";
 import { getSupabase } from "./middleware/supabase.js";
 
 export const app = new Hono();
@@ -21,5 +22,6 @@ app.route("/metrics", metricsRouter);
 app.route("/plan", planRouter);
 app.route("/coach", coachRouter);
 app.route("/proposals", proposalsRouter);
+app.route("/wellness", wellnessRouter);
 
 export default app;

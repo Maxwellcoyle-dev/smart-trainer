@@ -97,17 +97,23 @@ export function RpeSlider({ value, onChange }: RpeSliderProps) {
 interface SubmitButtonProps {
   saved: boolean;
   label: string;
+  pending?: boolean;
+  error?: string | null;
 }
 
-export function SubmitButton({ saved, label }: SubmitButtonProps) {
+export function SubmitButton({ saved, label, pending, error }: SubmitButtonProps) {
   return (
-    <button
-      type="submit"
-      className={`w-full py-4 rounded-2xl font-semibold text-white transition-all ${
-        saved ? "bg-success" : "bg-accent active:opacity-80"
-      }`}
-    >
-      {saved ? "✓ Logged!" : label}
-    </button>
+    <div className="space-y-2">
+      {error && <p className="text-danger text-sm text-center">{error}</p>}
+      <button
+        type="submit"
+        disabled={pending}
+        className={`w-full py-4 rounded-2xl font-semibold text-white transition-all disabled:opacity-50 ${
+          saved ? "bg-success" : "bg-accent active:opacity-80"
+        }`}
+      >
+        {saved ? "✓ Logged!" : pending ? "Saving…" : label}
+      </button>
+    </div>
   );
 }

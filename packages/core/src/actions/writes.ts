@@ -1,4 +1,5 @@
 import { SupabaseClient } from "../db.js";
+import { applyDiff, invertDiff } from "./apply.js";
 import type {
   WriteMode,
   WriteSource,
@@ -9,44 +10,57 @@ import type {
   SkeletonSlotInput,
   AdaptationDiff,
   Proposal,
-  AdaptationLog,
   Session,
   RunDetails,
   Climb,
   CheckIn,
   SorenessEntry,
+  InjuryFlag,
   WeekSkeleton,
   SkeletonSlot,
 } from "../types.js";
+import { getProfile } from "./reads.js";
+
+// ─── Injury-flag policy ───────────────────────────────────────────────────────
+
+/** Soreness severity at or above this value auto-opens/updates an injury_flag. */
+export const SORENESS_FLAG_THRESHOLD = 5;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Append one entry to the immutable adaptation ledger. Returns the new log id. */
 async function appendAdaptationLog(
   db: SupabaseClient,
   userId: string,
   source: WriteSource,
   action_type: string,
-  diff: AdaptationDiff,
+  diff: AdaptationDiff | AdaptationDiff[],
   rationale: string | null,
-  proposal_id?: string | null
-): Promise<void> {
-  const { error } = await db.from("adaptation_logs").insert({
-    user_id: userId,
-    source,
-    action_type,
-    diff,
-    rationale,
-    proposal_id: proposal_id ?? null,
-  });
+  extra?: { proposal_id?: string | null; reverts_log_id?: string | null }
+): Promise<string> {
+  const { data, error } = await db
+    .from("adaptation_logs")
+    .insert({
+      user_id: userId,
+      source,
+      action_type,
+      diff,
+      rationale,
+      proposal_id: extra?.proposal_id ?? null,
+      reverts_log_id: extra?.reverts_log_id ?? null,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return (data as { id: string }).id;
 }
 
 async function createProposal(
   db: SupabaseClient,
   userId: string,
-  source: "app_coach" | "desktop_mcp",
+  source: WriteSource,
   action_type: string,
-  diff: AdaptationDiff,
+  diff: AdaptationDiff | AdaptationDiff[],
   rationale: string | null
 ): Promise<Proposal> {
   const { data, error } = await db
@@ -298,6 +312,7 @@ export interface LogCheckInResult {
   mode: WriteMode;
   check_in?: CheckIn & { soreness_entries: SorenessEntry[] };
   proposal?: Proposal;
+  raised_flags?: InjuryFlag[];
 }
 
 export async function logCheckIn(
@@ -358,7 +373,89 @@ export async function logCheckIn(
     entries = data ?? [];
   }
 
-  return { mode: "apply", check_in: { ...ci, soreness_entries: entries } };
+  // ── Auto-flag pass (apply mode only) ─────────────────────────────────────
+
+  // Scope: watch_list from profile; empty list → all body parts in scope.
+  const profile = await getProfile(db, userId);
+  const watchList: string[] = profile?.watch_list ?? [];
+
+  // Fetch existing open flags once so we can match without extra round-trips.
+  const { data: openFlags, error: flagFetchErr } = await db
+    .from("injury_flags")
+    .select("*")
+    .eq("user_id", userId)
+    .is("deleted_at", null)
+    .neq("status", "resolved");
+  if (flagFetchErr) throw flagFetchErr;
+
+  const raisedFlags: InjuryFlag[] = [];
+
+  for (const entry of entries) {
+    // Only process parts that are in scope and meet the severity threshold.
+    const inScope = watchList.length === 0 || watchList.includes(entry.body_part);
+    if (!inScope || entry.severity < SORENESS_FLAG_THRESHOLD) continue;
+
+    const existing = (openFlags ?? []).find(
+      (f) => f.body_part === entry.body_part && f.side === entry.side
+    );
+
+    if (existing) {
+      // Update: take max severity, append dated note to narrative.
+      const newSeverity = Math.max(existing.severity ?? 0, entry.severity);
+      const note = `\n[${input.check_in_date}] check-in soreness ${entry.severity}/10`;
+      const { data: updated, error: updErr } = await db
+        .from("injury_flags")
+        .update({
+          severity: newSeverity,
+          narrative: (existing.narrative ?? "") + note,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      raisedFlags.push(updated as InjuryFlag);
+    } else {
+      // Insert: new flag at 'watch' status.
+      const { data: inserted, error: insErr } = await db
+        .from("injury_flags")
+        .insert({
+          user_id: userId,
+          body_part: entry.body_part,
+          side: entry.side,
+          status: "watch",
+          severity: entry.severity,
+          onset_date: input.check_in_date,
+          origin: source,
+          narrative: `Auto-raised from check-in ${input.check_in_date} — ${entry.body_part} soreness ${entry.severity}/10`,
+        })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      raisedFlags.push(inserted as InjuryFlag);
+    }
+  }
+
+  // Audit: one adaptation_log entry for the check-in (flags included in after).
+  await appendAdaptationLog(
+    db,
+    userId,
+    source,
+    "log_check_in",
+    {
+      entity_type: "check_in+soreness_entries",
+      entity_id: ci.id,
+      op: "create",
+      before: null,
+      after: {
+        check_in_id: ci.id,
+        raised_flag_ids: raisedFlags.map((f) => f.id),
+      },
+      fields: ["check_in_date", "soreness"],
+    },
+    null
+  );
+
+  return { mode: "apply", check_in: { ...ci, soreness_entries: entries }, raised_flags: raisedFlags };
 }
 
 // ─── Week skeleton ────────────────────────────────────────────────────────────
@@ -429,14 +526,20 @@ export async function setWeekSkeleton(
   return { mode: "apply", skeleton: { ...skeleton, skeleton_slots: slotRows } };
 }
 
-// ─── Resolve proposal ─────────────────────────────────────────────────────────
+// ─── Resolve proposal (apply or reject) ───────────────────────────────────────
+
+export interface ResolveResult {
+  status: "approved" | "rejected";
+  /** adaptation_logs id, when approved (the change actually applied). */
+  log_id?: string;
+}
 
 export async function resolveProposal(
   db: SupabaseClient,
   userId: string,
   proposalId: string,
   resolution: "approved" | "rejected"
-): Promise<void> {
+): Promise<ResolveResult> {
   const { data: proposal, error: fetchErr } = await db
     .from("proposals")
     .select("*")
@@ -444,26 +547,326 @@ export async function resolveProposal(
     .eq("user_id", userId)
     .single();
   if (fetchErr) throw fetchErr;
+  if (proposal.status !== "pending") {
+    throw new Error(`Proposal ${proposalId} is already ${proposal.status}`);
+  }
+
+  // Rejected: no domain change, nothing to apply or log.
+  if (resolution === "rejected") {
+    const { error } = await db
+      .from("proposals")
+      .update({ status: "rejected", resolved_at: new Date().toISOString() })
+      .eq("id", proposalId);
+    if (error) throw error;
+    return { status: "rejected" };
+  }
+
+  // Approved: replay the proposal's diff against the domain, then record it in
+  // the ledger with the originating source, so history + undo stay intact.
+  const { diffs } = await applyDiff(
+    db,
+    userId,
+    proposal.diff as AdaptationDiff | AdaptationDiff[]
+  );
+
+  const logId = await appendAdaptationLog(
+    db,
+    userId,
+    proposal.source as WriteSource,
+    proposal.action_type as string,
+    diffs,
+    (proposal.rationale as string | null) ?? null,
+    { proposal_id: proposalId }
+  );
 
   const { error: updateErr } = await db
     .from("proposals")
-    .update({ status: resolution, resolved_at: new Date().toISOString() })
+    .update({ status: "approved", resolved_at: new Date().toISOString() })
     .eq("id", proposalId);
   if (updateErr) throw updateErr;
 
-  if (resolution === "approved") {
-    await appendAdaptationLog(
-      db, userId, "manual", `resolve_proposal:approved`,
-      {
-        entity_type: "proposal",
-        entity_id: proposalId,
-        op: "update",
-        before: { status: "pending" },
-        after: { status: "approved" },
-        fields: ["status"],
-      },
-      null,
-      proposalId
-    );
+  return { status: "approved", log_id: logId };
+}
+
+// ─── Undo an applied change ───────────────────────────────────────────────────
+
+/**
+ * Undo adaptation_logs[logId] by applying the inverse of its diff and appending
+ * a new ledger entry that points back at the original (`reverts_log_id`). The
+ * ledger stays append-only; the original is stamped `reverted_at`.
+ */
+export async function undoAdaptation(
+  db: SupabaseClient,
+  userId: string,
+  logId: string
+): Promise<{ undo_log_id: string }> {
+  const { data: log, error } = await db
+    .from("adaptation_logs")
+    .select("*")
+    .eq("id", logId)
+    .eq("user_id", userId)
+    .single();
+  if (error) throw error;
+  if (log.reverted_at) throw new Error(`Log ${logId} has already been undone`);
+
+  const inverse = invertDiff(log.diff as AdaptationDiff | AdaptationDiff[]);
+  await applyDiff(db, userId, inverse);
+
+  const undoLogId = await appendAdaptationLog(
+    db,
+    userId,
+    "manual",
+    `undo:${log.action_type}`,
+    inverse,
+    `Undo of ${logId}`,
+    { reverts_log_id: logId }
+  );
+
+  const { error: stampErr } = await db
+    .from("adaptation_logs")
+    .update({ reverted_at: new Date().toISOString() })
+    .eq("id", logId);
+  if (stampErr) throw stampErr;
+
+  return { undo_log_id: undoLogId };
+}
+
+// ─── fill_week (skeleton → prescribed sessions) ───────────────────────────────
+
+export interface FillWeekResult {
+  mode: WriteMode;
+  count: number;
+  proposal?: Proposal;
+  log_id?: string;
+}
+
+/**
+ * Expand the user's active week skeleton into prescribed_sessions for one plan
+ * week. This is the deterministic scaffold ("the frame Claude fills"); richer
+ * per-session prescriptions come later from the coach via adjust_session.
+ * In-app/hook callers use `propose`; Desktop may `apply` directly.
+ */
+export async function fillWeek(
+  db: SupabaseClient,
+  userId: string,
+  planWeekId: string,
+  mode: WriteMode = "propose",
+  source: WriteSource = "app_coach"
+): Promise<FillWeekResult> {
+  const { data: week, error: weekErr } = await db
+    .from("plan_weeks")
+    .select("id, start_date")
+    .eq("id", planWeekId)
+    .eq("user_id", userId)
+    .single();
+  if (weekErr) throw weekErr;
+
+  const { data: skeleton, error: skErr } = await db
+    .from("week_skeletons")
+    .select("id, skeleton_slots(*)")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (skErr) throw skErr;
+
+  const slots: SkeletonSlot[] = (skeleton?.skeleton_slots ?? []) as SkeletonSlot[];
+  const startDate = week.start_date as string | null;
+
+  const diffs: AdaptationDiff[] = slots
+    .filter((s) => s.sport !== "rest")
+    .map((s) => {
+      let scheduled_date: string | null = null;
+      if (startDate) {
+        const d = new Date(startDate + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() + s.day_of_week);
+        scheduled_date = d.toISOString().slice(0, 10);
+      }
+      return {
+        entity_type: "prescribed_sessions",
+        entity_id: null,
+        op: "create",
+        before: null,
+        after: {
+          plan_week_id: planWeekId,
+          day_of_week: s.day_of_week,
+          scheduled_date,
+          sport: s.sport,
+          order_in_day: s.order_in_day,
+          prescription: { kind: s.sport },
+          status: "planned",
+        },
+        fields: ["sport", "day_of_week", "scheduled_date", "prescription"],
+      };
+    });
+
+  const rationale = `Filled plan week from active skeleton (${diffs.length} sessions)`;
+
+  if (mode === "propose") {
+    const proposal = await createProposal(db, userId, source, "fill_week", diffs, rationale);
+    return { mode: "propose", count: diffs.length, proposal };
   }
+
+  const { diffs: applied } = await applyDiff(db, userId, diffs);
+  const logId = await appendAdaptationLog(db, userId, source, "fill_week", applied, rationale);
+  return { mode: "apply", count: diffs.length, log_id: logId };
+}
+
+// ─── adjust_session (edit a single prescribed session) ────────────────────────
+
+export interface AdjustSessionResult {
+  mode: WriteMode;
+  proposal?: Proposal;
+  log_id?: string;
+}
+
+export async function adjustSession(
+  db: SupabaseClient,
+  userId: string,
+  prescribedSessionId: string,
+  changes: Record<string, unknown>,
+  mode: WriteMode = "propose",
+  source: WriteSource = "app_coach",
+  rationale: string | null = null
+): Promise<AdjustSessionResult> {
+  const fields = Object.keys(changes);
+  if (fields.length === 0) throw new Error("adjustSession: no changes provided");
+
+  const { data: current, error } = await db
+    .from("prescribed_sessions")
+    .select("*")
+    .eq("id", prescribedSessionId)
+    .eq("user_id", userId)
+    .single();
+  if (error) throw error;
+
+  const before: Record<string, unknown> = {};
+  for (const f of fields) before[f] = (current as Record<string, unknown>)[f];
+
+  const diff: AdaptationDiff = {
+    entity_type: "prescribed_sessions",
+    entity_id: prescribedSessionId,
+    op: "update",
+    before,
+    after: changes,
+    fields,
+  };
+
+  if (mode === "propose") {
+    const proposal = await createProposal(db, userId, source, "adjust_session", diff, rationale);
+    return { mode: "propose", proposal };
+  }
+
+  const { diffs } = await applyDiff(db, userId, diff);
+  const logId = await appendAdaptationLog(db, userId, source, "adjust_session", diffs, rationale);
+  return { mode: "apply", log_id: logId };
+}
+
+// ─── create_plan (scaffold a plan → phase → weeks) ────────────────────────────
+
+export interface CreatePlanInput {
+  name: string;
+  start_date: string;   // ISO date (YYYY-MM-DD); ideally a Monday
+  n_weeks: number;      // number of plan_weeks to scaffold
+  intent?: string | null;
+}
+
+export interface CreatePlanResult {
+  plan_id: string;
+  phase_id: string;
+  plan_week_ids: string[];
+  log_id: string;
+}
+
+/**
+ * Scaffold an active plan with one phase and `n_weeks` empty plan_weeks (Mondays
+ * stepping weekly from start_date). This gives `fill_week` and the coach a target
+ * to write prescribed sessions into. Any previously-active plan is marked
+ * 'completed' so the "current plan" stays singular (getCurrentPlan uses single()).
+ * Manual user action → direct apply + audit log.
+ */
+export async function createPlan(
+  db: SupabaseClient,
+  userId: string,
+  input: CreatePlanInput,
+  source: WriteSource = "manual"
+): Promise<CreatePlanResult> {
+  const nWeeks = Math.max(1, Math.floor(input.n_weeks));
+
+  const start = new Date(input.start_date + "T00:00:00Z");
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + nWeeks * 7 - 1);
+  const endDate = end.toISOString().slice(0, 10);
+
+  // Keep "current plan" singular.
+  await db
+    .from("plans")
+    .update({ status: "completed" })
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  const { data: plan, error: planErr } = await db
+    .from("plans")
+    .insert({
+      user_id: userId,
+      name: input.name,
+      status: "active",
+      start_date: input.start_date,
+      end_date: endDate,
+      intent: input.intent ?? null,
+    })
+    .select("id")
+    .single();
+  if (planErr) throw planErr;
+
+  const { data: phase, error: phaseErr } = await db
+    .from("phases")
+    .insert({
+      user_id: userId,
+      plan_id: plan.id,
+      phase_index: 0,
+      name: "Block 1",
+      type: "base",
+      intent: input.intent ?? null,
+      start_date: input.start_date,
+      end_date: endDate,
+    })
+    .select("id")
+    .single();
+  if (phaseErr) throw phaseErr;
+
+  const weekRows = Array.from({ length: nWeeks }, (_, i) => {
+    const ws = new Date(start);
+    ws.setUTCDate(ws.getUTCDate() + i * 7);
+    return {
+      user_id: userId,
+      phase_id: phase.id,
+      week_index: i,
+      start_date: ws.toISOString().slice(0, 10),
+    };
+  });
+  const { data: weeks, error: weekErr } = await db
+    .from("plan_weeks")
+    .insert(weekRows)
+    .select("id");
+  if (weekErr) throw weekErr;
+  const planWeekIds = (weeks ?? []).map((w) => (w as { id: string }).id);
+
+  const logId = await appendAdaptationLog(
+    db,
+    userId,
+    source,
+    "create_plan",
+    {
+      entity_type: "plans",
+      entity_id: plan.id,
+      op: "create",
+      before: null,
+      after: { plan_id: plan.id, phase_id: phase.id, n_weeks: nWeeks },
+      fields: ["name", "start_date", "end_date"],
+    },
+    `Created plan "${input.name}" (${nWeeks} weeks)`
+  );
+
+  return { plan_id: plan.id, phase_id: phase.id, plan_week_ids: planWeekIds, log_id: logId };
 }

@@ -1,39 +1,34 @@
 import { useState, useRef, useEffect } from "react";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
+import { useCoachChat, type CoachMessage as Message } from "../lib/hooks.ts";
 
 export function CoachPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const coach = useCoachChat();
+  const loading = coach.isPending;
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, loading]);
 
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    setLoading(true);
-    try {
-      // TODO: wire to /coach/chat endpoint once backend is connected
-      await new Promise((r) => setTimeout(r, 800));
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: "Backend not connected yet. Once you set up Supabase + Railway, coach chat will be live here with full training context.",
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    const next: Message[] = [...messages, { role: "user", content: text }];
+    setMessages(next);
+    coach.mutate(next, {
+      onSuccess: (reply) => {
+        setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      },
+      onError: (err) => {
+        setMessages((m) => [
+          ...m,
+          { role: "assistant", content: `⚠️ ${(err as Error).message}` },
+        ]);
+      },
+    });
   }
 
   return (
