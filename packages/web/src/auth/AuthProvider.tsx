@@ -2,10 +2,13 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase.ts";
 
+const SITE_URL = import.meta.env.VITE_PUBLIC_SITE_URL ?? window.location.origin;
+
 interface AuthState {
   session: Session | null;
   loading: boolean;
   signInWithEmail: (email: string) => Promise<{ error: string | null }>;
+  verifyCode: (email: string, token: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -29,8 +32,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signInWithEmail(email: string) {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: SITE_URL },
     });
+    return { error: error?.message ?? null };
+  }
+
+  async function verifyCode(email: string, token: string) {
+    const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
     return { error: error?.message ?? null };
   }
 
@@ -39,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, loading, signInWithEmail, signOut }}>
+    <AuthContext.Provider value={{ session, loading, signInWithEmail, verifyCode, signOut }}>
       {children}
     </AuthContext.Provider>
   );
