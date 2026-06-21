@@ -237,10 +237,53 @@ export interface CurrentPlan {
   phases: Phase[];
 }
 
+export interface Goal {
+  id: string;
+  kind: "event" | "grade" | "process" | "metric";
+  title: string;
+  sport: string | null;
+  target_date: string | null;
+  priority: number;
+  status: string;
+  notes: string | null;
+}
+
 export function useCurrentPlan() {
   return useQuery({
     queryKey: ["plan", "current"],
-    queryFn: () => api.get<{ plan: CurrentPlan | null; goals: unknown[] }>("/plan/current"),
+    queryFn: () => api.get<{ plan: CurrentPlan | null; goals: Goal[] }>("/plan/current"),
+  });
+}
+
+export function useCreateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      kind: Goal["kind"];
+      title: string;
+      sport?: string | null;
+      target_date?: string | null;
+      priority?: number;
+      notes?: string | null;
+    }) => api.post<Goal>("/plan/goals", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
+  });
+}
+
+export function useUpdateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; title?: string; status?: string; priority?: number; notes?: string | null }) =>
+      api.patch<Goal>(`/plan/goals/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
+  });
+}
+
+export function useDeleteGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<Goal>(`/plan/goals/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
   });
 }
 

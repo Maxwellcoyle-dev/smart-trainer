@@ -19,6 +19,8 @@ import {
   getAdherence,
   setWeekSkeleton,
   createPlan,
+  createGoal,
+  updateGoal,
   fillWeek,
   adjustSession,
   undoAdaptation,
@@ -30,6 +32,9 @@ import {
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
+  GoalKindSchema,
+  GoalStatusSchema,
+  SportTypeSchema,
 } from "@smart-trainer/core";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
@@ -251,6 +256,47 @@ server.tool(
     const data = await adjustSession(
       db, USER_ID, prescribed_session_id, changes, mode, "desktop_mcp", rationale ?? null
     );
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "create_goal",
+  "Create a new training goal (event, grade, process, or metric). Direct apply — logged immediately in the adaptation ledger.",
+  {
+    kind: GoalKindSchema,
+    title: z.string().min(1).describe("Short goal title"),
+    sport: SportTypeSchema.optional().nullable(),
+    target_date: z.string().optional().nullable().describe("YYYY-MM-DD"),
+    target: z.record(z.string(), z.unknown()).optional(),
+    priority: z.number().int().min(1).optional(),
+    notes: z.string().optional().nullable(),
+  },
+  async ({ kind, title, sport, target_date, target, priority, notes }) => {
+    const data = await createGoal(
+      db, USER_ID,
+      { kind, title, sport: sport ?? null, target_date: target_date ?? null, target, priority, notes: notes ?? null },
+      "desktop_mcp"
+    );
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_goal",
+  "Update an existing training goal. Pass only the fields to change. Set status to 'achieved' or 'abandoned' to close a goal.",
+  {
+    goal_id: z.string().uuid(),
+    title: z.string().min(1).optional(),
+    sport: SportTypeSchema.optional().nullable(),
+    target_date: z.string().optional().nullable(),
+    target: z.record(z.string(), z.unknown()).optional(),
+    priority: z.number().int().min(1).optional(),
+    status: GoalStatusSchema.optional(),
+    notes: z.string().optional().nullable(),
+  },
+  async ({ goal_id, ...changes }) => {
+    const data = await updateGoal(db, USER_ID, goal_id, changes, "desktop_mcp");
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 );

@@ -9,7 +9,12 @@ import {
   fillWeek,
   adjustSession,
   createPlan,
+  createGoal,
+  updateGoal,
+  deleteGoal,
   SportTypeSchema,
+  GoalKindSchema,
+  GoalStatusSchema,
 } from "@smart-trainer/core";
 
 export const planRouter = new Hono();
@@ -89,4 +94,46 @@ planRouter.post("/adjust-session", zValidator("json", AdjustSessionBody), async 
   return c.json(
     await adjustSession(db, userId, prescribed_session_id, changes, mode, "app_coach", rationale ?? null)
   );
+});
+
+// ─── Goals ────────────────────────────────────────────────────────────────────
+
+const CreateGoalBody = z.object({
+  kind: GoalKindSchema,
+  title: z.string().min(1),
+  sport: SportTypeSchema.nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  target: z.record(z.string(), z.unknown()).optional(),
+  priority: z.number().int().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+planRouter.post("/goals", zValidator("json", CreateGoalBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  return c.json(await createGoal(db, userId, c.req.valid("json")), 201);
+});
+
+const UpdateGoalBody = z.object({
+  title: z.string().min(1).optional(),
+  sport: SportTypeSchema.nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  target: z.record(z.string(), z.unknown()).optional(),
+  priority: z.number().int().optional(),
+  status: GoalStatusSchema.optional(),
+  notes: z.string().nullable().optional(),
+});
+
+planRouter.patch("/goals/:id", zValidator("json", UpdateGoalBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const goalId = c.req.param("id");
+  return c.json(await updateGoal(db, userId, goalId, c.req.valid("json")));
+});
+
+planRouter.delete("/goals/:id", async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const goalId = c.req.param("id");
+  return c.json(await deleteGoal(db, userId, goalId));
 });
