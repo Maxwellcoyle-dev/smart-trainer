@@ -112,3 +112,61 @@ After this, the standard workflow is restored: create new migrations with `supab
 ## When done — record your result (required)
 
 Append a `## Result (P20 — completed <date>)` section to the bottom of THIS file: branch + commit hash + PR, confirmation of the 14 renames, the before/after ledger query output, which path you used (MCP SQL vs CLI repair), the `db push --dry-run` result (or the command handed to Max), any stale references you updated, and anything for the PM to verify.
+
+## Result (P20 — completed 2026-06-20)
+
+**Branch:** `feat/migration-rename` | **Commit:** `2fe8e48` | **PR:** https://github.com/Maxwellcoyle-dev/smart-trainer/pull/5
+
+### 14 renames (git mv, no content changes)
+| Old | New |
+|---|---|
+| `0001_init.sql` | `20260617170001_init.sql` |
+| `0002_enums.sql` | `20260617170002_enums.sql` |
+| `0003_profile.sql` | `20260617170003_profile.sql` |
+| `0004_goals.sql` | `20260617170004_goals.sql` |
+| `0005_plans.sql` | `20260617170005_plans.sql` |
+| `0006_skeleton.sql` | `20260617170006_skeleton.sql` |
+| `0007_reference.sql` | `20260617170007_reference.sql` |
+| `0008_sessions.sql` | `20260617170008_sessions.sql` |
+| `0009_wellness.sql` | `20260617170009_wellness.sql` |
+| `0009b_fk_backfill.sql` | `20260617170010_fk_backfill.sql` |
+| `0010_ai_audit.sql` | `20260617170011_ai_audit.sql` |
+| `0011_views.sql` | `20260617170012_views.sql` |
+| `0012_rls.sql` | `20260617170013_rls.sql` |
+| `0099_seed_grades.sql` | `20260617170014_seed_grades.sql` |
+
+### Ledger — before
+```
+0001 0002 0003 0004 0005 0006 0007 0008 0009 0009b 0010 0011 0012 0099
+```
+
+### Ledger — after (via Supabase MCP `execute_sql`, single transaction)
+```
+20260617170001 init
+20260617170002 enums
+20260617170003 profile
+20260617170004 goals
+20260617170005 plans
+20260617170006 skeleton
+20260617170007 reference
+20260617170008 sessions
+20260617170009 wellness
+20260617170010 fk_backfill
+20260617170011 ai_audit
+20260617170012 views
+20260617170013 rls
+20260617170014 seed_grades
+```
+14 rows, all 14-digit timestamps, no short versions remaining.
+
+### Stale references updated
+- `AGENT-TASK-goals-crud.md` line 13: `0004_goals.sql` → `20260617170004_goals.sql`
+- SQL file comments referencing `0009b` inside `20260617170005_plans.sql` were left as-is (guardrail: no SQL content edits).
+
+### Acceptance gate — hand to Max
+```bash
+cd ~/dev/smart-trainer
+supabase link --project-ref epxpruvowgwbmwrkmofk
+supabase migration list     # both local + remote should list 14 timestamps, aligned
+supabase db push --dry-run  # expect: no migrations to apply
+```
