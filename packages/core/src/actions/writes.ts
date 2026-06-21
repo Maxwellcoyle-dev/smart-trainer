@@ -18,6 +18,9 @@ import type {
   InjuryFlag,
   WeekSkeleton,
   SkeletonSlot,
+  Goal,
+  CreateGoalInput,
+  UpdateGoalInput,
 } from "../types.js";
 import { getProfile } from "./reads.js";
 
@@ -869,4 +872,139 @@ export async function createPlan(
   );
 
   return { plan_id: plan.id, phase_id: phase.id, plan_week_ids: planWeekIds, log_id: logId };
+}
+
+// ─── Goals (create / update / soft-delete) ────────────────────────────────────
+
+/**
+ * Build a before/after diff object limited to the keys that actually changed.
+ * Pure function — easy to unit-test without a DB.
+ */
+export function buildGoalDiff(
+  current: Record<string, unknown>,
+  changes: Record<string, unknown>
+): { before: Record<string, unknown>; after: Record<string, unknown>; fields: string[] } {
+  const fields = Object.keys(changes);
+  const before: Record<string, unknown> = {};
+  for (const f of fields) before[f] = current[f];
+  return { before, after: changes, fields };
+}
+
+export async function createGoal(
+  db: SupabaseClient,
+  userId: string,
+  input: CreateGoalInput,
+  source: WriteSource = "manual"
+): Promise<Goal> {
+  const { data, error } = await db
+    .from("goals")
+    .insert({
+      user_id: userId,
+      kind: input.kind,
+      title: input.title,
+      sport: input.sport ?? null,
+      target_date: input.target_date ?? null,
+      target: input.target ?? {},
+      priority: input.priority ?? 1,
+      notes: input.notes ?? null,
+      status: "active",
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  const goal = data as Goal;
+
+  await appendAdaptationLog(db, userId, source, "create_goal", {
+    entity_type: "goals",
+    entity_id: goal.id,
+    op: "create",
+    before: null,
+    after: { goal_id: goal.id, kind: goal.kind, title: goal.title },
+    fields: ["kind", "title", "sport", "target_date", "priority"],
+  }, null);
+
+  return goal;
+}
+
+export async function updateGoal(
+  db: SupabaseClient,
+  userId: string,
+  goalId: string,
+  changes: UpdateGoalInput,
+  source: WriteSource = "manual"
+): Promise<Goal> {
+  const fields = Object.keys(changes).filter(
+    (k) => (changes as Record<string, unknown>)[k] !== undefined
+  );
+  if (fields.length === 0) throw new Error("updateGoal: no changes provided");
+
+  const { data: current, error: fetchErr } = await db
+    .from("goals")
+    .select("*")
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const defined: Record<string, unknown> = {};
+  for (const f of fields) defined[f] = (changes as Record<string, unknown>)[f];
+
+  const { before, after } = buildGoalDiff(current as Record<string, unknown>, defined);
+
+  const { data: updated, error: upErr } = await db
+    .from("goals")
+    .update(defined)
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (upErr) throw upErr;
+
+  await appendAdaptationLog(db, userId, source, "update_goal", {
+    entity_type: "goals",
+    entity_id: goalId,
+    op: "update",
+    before,
+    after,
+    fields,
+  }, null);
+
+  return updated as Goal;
+}
+
+export async function deleteGoal(
+  db: SupabaseClient,
+  userId: string,
+  goalId: string,
+  source: WriteSource = "manual"
+): Promise<Goal> {
+  const { data: current, error: fetchErr } = await db
+    .from("goals")
+    .select("*")
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const deletedAt = new Date().toISOString();
+  const { data, error } = await db
+    .from("goals")
+    .update({ status: "abandoned", deleted_at: deletedAt })
+    .eq("id", goalId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+
+  const cur = current as Record<string, unknown>;
+  await appendAdaptationLog(db, userId, source, "update_goal", {
+    entity_type: "goals",
+    entity_id: goalId,
+    op: "update",
+    before: { status: cur["status"], deleted_at: cur["deleted_at"] },
+    after: { status: "abandoned", deleted_at: deletedAt },
+    fields: ["status", "deleted_at"],
+  }, "Goal soft-deleted");
+
+  return data as Goal;
 }

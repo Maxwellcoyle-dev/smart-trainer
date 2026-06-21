@@ -100,6 +100,28 @@ export const GoalSchema = z.object({
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
+export const CreateGoalInputSchema = z.object({
+  kind: GoalKindSchema,
+  title: z.string().min(1),
+  sport: SportTypeSchema.nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  target: z.record(z.string(), z.unknown()).optional(),
+  priority: z.number().int().optional(),
+  notes: z.string().nullable().optional(),
+});
+export type CreateGoalInput = z.infer<typeof CreateGoalInputSchema>;
+
+export const UpdateGoalInputSchema = z.object({
+  title: z.string().min(1).optional(),
+  sport: SportTypeSchema.nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  target: z.record(z.string(), z.unknown()).optional(),
+  priority: z.number().int().optional(),
+  status: GoalStatusSchema.optional(),
+  notes: z.string().nullable().optional(),
+});
+export type UpdateGoalInput = z.infer<typeof UpdateGoalInputSchema>;
+
 // ─── Planning structure ───────────────────────────────────────────────────────
 
 export const PlanSchema = z.object({

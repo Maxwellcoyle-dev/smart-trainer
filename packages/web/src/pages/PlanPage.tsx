@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SportType } from "@smart-trainer/core";
+import type { Goal } from "../lib/hooks.ts";
 import {
   useSkeleton,
   useSaveSkeleton,
@@ -8,6 +9,9 @@ import {
   useCurrentPlan,
   useCreatePlan,
   useFillWeek,
+  useCreateGoal,
+  useUpdateGoal,
+  useDeleteGoal,
 } from "../lib/hooks.ts";
 
 /** Next Monday in YYYY-MM-DD (sensible default plan start). */
@@ -20,6 +24,8 @@ function nextMonday(): string {
 }
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const GOAL_KINDS: Goal["kind"][] = ["event", "grade", "process", "metric"];
 
 const SPORTS: { value: SportType | null; label: string; color: string }[] = [
   { value: null, label: "Rest", color: "text-muted" },
@@ -43,9 +49,39 @@ export function PlanPage() {
   const { data: planData } = useCurrentPlan();
   const createPlan = useCreatePlan();
   const fillWeek = useFillWeek();
+  const createGoal = useCreateGoal();
+  const updateGoal = useUpdateGoal();
+  const deleteGoal = useDeleteGoal();
 
   const plan = planData?.plan ?? null;
+  const goals = planData?.goals ?? [];
   const planWeeks = plan?.phases?.flatMap((ph) => ph.plan_weeks) ?? [];
+
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalKind, setGoalKind] = useState<Goal["kind"]>("event");
+  const [goalDate, setGoalDate] = useState("");
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+
+  function submitGoal() {
+    const title = goalTitle.trim();
+    if (!title) return;
+    createGoal.mutate(
+      { kind: goalKind, title, target_date: goalDate || null },
+      { onSuccess: () => { setGoalTitle(""); setGoalDate(""); } }
+    );
+  }
+
+  function startEdit(g: Goal) {
+    setEditingGoalId(g.id);
+    setEditTitle(g.title);
+  }
+
+  function saveEdit(id: string) {
+    const title = editTitle.trim();
+    if (!title) return;
+    updateGoal.mutate({ id, title }, { onSuccess: () => setEditingGoalId(null) });
+  }
 
   const [planName, setPlanName] = useState("");
   const [planWeeksCount, setPlanWeeksCount] = useState("8");
@@ -229,6 +265,98 @@ export function PlanPage() {
             </p>
           </div>
         )}
+      </div>
+
+      {/* Goals */}
+      <div className="bg-surface rounded-2xl p-4">
+        <p className="text-muted text-xs uppercase tracking-wider mb-3">Goals</p>
+
+        {goals.length > 0 && (
+          <div className="space-y-2 mb-4">
+            {goals.map((g) => (
+              <div key={g.id} className="bg-surface2 rounded-xl px-3 py-2 space-y-1">
+                {editingGoalId === g.id ? (
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveEdit(g.id); if (e.key === "Escape") setEditingGoalId(null); }}
+                      className="flex-1 bg-surface rounded-lg px-2 py-1 text-sm outline-none"
+                    />
+                    <button
+                      onClick={() => saveEdit(g.id)}
+                      disabled={updateGoal.isPending}
+                      className="px-3 py-1 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button onClick={() => setEditingGoalId(null)} className="px-2 py-1 text-xs text-muted">
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{g.title}</p>
+                      <p className="text-muted text-xs">
+                        {g.kind}{g.target_date ? ` · ${g.target_date}` : ""}{g.sport ? ` · ${g.sport}` : ""} · priority {g.priority}
+                      </p>
+                    </div>
+                    <button onClick={() => startEdit(g)} className="text-muted text-xs px-2 py-1 rounded-lg hover:bg-surface active:opacity-70">
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteGoal.mutate(g.id)}
+                      disabled={deleteGoal.isPending && deleteGoal.variables === g.id}
+                      className="text-danger text-xs px-2 py-1 rounded-lg hover:bg-surface active:opacity-70 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add goal form */}
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={goalTitle}
+            onChange={(e) => setGoalTitle(e.target.value)}
+            placeholder="Goal title (e.g. Run a sub-4h marathon)"
+            className="w-full bg-surface2 rounded-xl px-4 py-3 text-sm outline-none placeholder:text-muted"
+          />
+          <div className="flex gap-2">
+            <select
+              value={goalKind}
+              onChange={(e) => setGoalKind(e.target.value as Goal["kind"])}
+              className="flex-1 bg-surface2 rounded-xl px-3 py-2 text-sm outline-none"
+            >
+              {GOAL_KINDS.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={goalDate}
+              onChange={(e) => setGoalDate(e.target.value)}
+              className="flex-1 bg-surface2 rounded-xl px-3 py-2 text-sm outline-none"
+            />
+          </div>
+          {createGoal.isError && (
+            <p className="text-danger text-sm">{(createGoal.error as Error).message}</p>
+          )}
+          <button
+            disabled={createGoal.isPending || !goalTitle.trim()}
+            onClick={submitGoal}
+            className="w-full py-3 rounded-xl bg-accent text-white font-semibold disabled:opacity-50 active:opacity-80"
+          >
+            {createGoal.isPending ? "Adding…" : "Add goal"}
+          </button>
+        </div>
       </div>
 
       {/* Pending proposals */}
