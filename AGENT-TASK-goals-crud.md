@@ -10,7 +10,7 @@ A personal mobile-first PWA (running + climbing + injury-prevention strength) wi
 
 ## What already exists (read these first)
 
-- **Table** — `supabase/migrations/0004_goals.sql`:
+- **Table** — `supabase/migrations/20260617170004_goals.sql`:
   ```
   goals(id, user_id, kind goal_kind, sport sport_type NULL, title text,
         target_date date NULL, target jsonb DEFAULT '{}', priority smallint DEFAULT 1,
