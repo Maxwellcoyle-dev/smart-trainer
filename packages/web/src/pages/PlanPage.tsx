@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { SportType } from "@smart-trainer/core";
+import type { SportType, AdaptationDiff } from "@smart-trainer/core";
+import { ProposalDiff } from "../components/plan/ProposalDiff.tsx";
 import type { Goal } from "../lib/hooks.ts";
 import {
   useSkeleton,
@@ -367,19 +368,13 @@ export function PlanPage() {
         ) : (
           <div className="space-y-3">
             {proposals.map((p) => {
-              const diff = p.diff as { entity_type?: string; op?: string; fields?: string[] } | null;
-              const summary = diff
-                ? [diff.op, diff.entity_type, (diff.fields ?? []).join(", ")]
-                    .filter(Boolean)
-                    .join(" · ")
-                : null;
               const isLoading = resolveProposal.isPending && resolveProposal.variables?.id === p.id;
               return (
                 <div key={p.id} className="bg-surface2 rounded-xl p-3 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-sm font-medium">{p.action_type}</span>
-                    {summary && <span className="text-muted text-xs">{summary}</span>}
-                  </div>
+                  <span className="text-sm font-medium">{p.action_type}</span>
+                  {p.diff && (
+                    <ProposalDiff diff={p.diff as AdaptationDiff | AdaptationDiff[]} />
+                  )}
                   {p.rationale && (
                     <p className="text-muted text-xs leading-relaxed">{p.rationale}</p>
                   )}
