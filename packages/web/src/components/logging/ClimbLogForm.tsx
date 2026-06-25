@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { RpeSlider, Field, SubmitButton } from "./shared.tsx";
-import type { ClimbStyle, ClimbEnvironment, ClimbAngle, ClimbCharacter, ClimbResult, Grade } from "@smart-trainer/core";
-import { useLogClimb, useClimbPlaces, useGrades } from "../../lib/hooks.ts";
+import type { ClimbStyle, ClimbEnvironment, ClimbAngle, ClimbCharacter, ClimbResult } from "@smart-trainer/core";
+import { useLogClimb, useClimbPlaces } from "../../lib/hooks.ts";
+import { gradesForDiscipline } from "../../lib/grades.ts";
 
 interface ClimbEntry {
   grade_label: string;
@@ -60,23 +61,21 @@ const RESULT_BADGE: Record<ClimbResult, string> = {
 
 function ClimbRow({
   climb,
-  grades,
   onChange,
   onRemove,
 }: {
   climb: ClimbEntry;
-  grades: Grade[];
   onChange: (c: ClimbEntry) => void;
   onRemove: () => void;
 }) {
   const discipline = DISCIPLINE_FOR_STYLE(climb.style);
-  const gradeOptions = grades.filter((g) => g.discipline === discipline);
+  const gradeOptions = gradesForDiscipline(discipline);
 
-  function selectGrade(id: string) {
-    const g = gradeOptions.find((x) => x.id === id);
+  function selectGrade(label: string) {
+    const g = gradeOptions.find((x) => x.label === label);
     onChange({
       ...climb,
-      grade_id: g?.id ?? null,
+      grade_id: null,
       grade_label: g?.label ?? "",
       grade_value: g?.grade_value ?? null,
       expanded: true,
@@ -108,18 +107,16 @@ function ClimbRow({
         onClick={canCollapse ? toggleExpand : undefined}
       >
         <select
-          value={climb.grade_id ?? ""}
+          value={climb.grade_label}
           onChange={(e) => selectGrade(e.target.value)}
           onClick={(e) => e.stopPropagation()}
           className={`flex-1 bg-surface rounded-lg px-3 py-2 text-sm outline-none ${
             hasGrade ? "text-text" : "text-muted"
           }`}
         >
-          <option value="">
-            {grades.length === 0 ? "Loading grades…" : "Select grade…"}
-          </option>
+          <option value="">Select grade…</option>
           {gradeOptions.map((g) => (
-            <option key={g.id} value={g.id}>{g.label}</option>
+            <option key={g.label} value={g.label}>{g.label}</option>
           ))}
         </select>
         {!climb.expanded && (
@@ -362,7 +359,6 @@ const newClimb = (): ClimbEntry => ({
 export function ClimbLogForm() {
   const logClimb = useLogClimb();
   const { data: places } = useClimbPlaces();
-  const { data: grades } = useGrades();
   const [environment, setEnvironment] = useState<ClimbEnvironment>("indoor");
   const [location, setLocation] = useState("");
   const [wall, setWall] = useState("");
@@ -487,7 +483,6 @@ export function ClimbLogForm() {
           <ClimbRow
             key={i}
             climb={c}
-            grades={grades ?? []}
             onChange={(u) => updateClimb(i, u)}
             onRemove={() => setClimbs((cs) => cs.filter((_, j) => j !== i))}
           />
