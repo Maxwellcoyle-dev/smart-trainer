@@ -6,9 +6,13 @@ import {
   logClimbSession,
   logStrength,
   logCheckIn,
+  getClimbPlaces,
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
+  ClimbAngleSchema,
+  ClimbCharacterSchema,
+  ClimbResultSchema,
   BodyPartSchema,
   BodySideSchema,
 } from "@smart-trainer/core";
@@ -45,6 +49,14 @@ const ClimbBody = z.object({
     route_name: z.string().optional().nullable(),
     crag: z.string().optional().nullable(),
     order_in_session: z.number().int().optional(),
+    // P23 fields
+    angle: ClimbAngleSchema.optional().nullable(),
+    character_tags: z.array(ClimbCharacterSchema).optional(),
+    length_ft: z.number().int().min(1).max(5000).optional().nullable(),
+    effort: z.number().int().min(1).max(10).optional().nullable(),
+    result: ClimbResultSchema.optional().nullable(),
+    climb_notes: z.string().optional().nullable(),
+    wall: z.string().optional().nullable(),
   })),
 });
 
@@ -105,4 +117,11 @@ logsRouter.post("/checkin", zValidator("json", CheckInBody), async (c) => {
   const userId = c.get("userId");
   const result = await logCheckIn(db, userId, c.req.valid("json"));
   return c.json(result, 201);
+});
+
+logsRouter.get("/climb/places", async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const places = await getClimbPlaces(db, userId);
+  return c.json(places);
 });

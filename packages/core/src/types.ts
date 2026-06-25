@@ -33,6 +33,17 @@ export type ClimbStyle = z.infer<typeof ClimbStyleSchema>;
 export const ClimbEnvironmentSchema = z.enum(["indoor", "outdoor"]);
 export type ClimbEnvironment = z.infer<typeof ClimbEnvironmentSchema>;
 
+export const ClimbAngleSchema = z.enum(["slab", "vertical", "overhang", "roof"]);
+export type ClimbAngle = z.infer<typeof ClimbAngleSchema>;
+
+export const ClimbCharacterSchema = z.enum([
+  "powerful", "endurance", "technical", "crimpy", "dynamic",
+]);
+export type ClimbCharacter = z.infer<typeof ClimbCharacterSchema>;
+
+export const ClimbResultSchema = z.enum(["onsight", "flash", "redpoint", "hung", "dnf"]);
+export type ClimbResult = z.infer<typeof ClimbResultSchema>;
+
 export const RunSurfaceSchema = z.enum(["trail", "road", "track", "treadmill", "mixed"]);
 export type RunSurface = z.infer<typeof RunSurfaceSchema>;
 
@@ -282,6 +293,14 @@ export const ClimbSchema = z.object({
   route_name: z.string().nullable(),
   crag: z.string().nullable(),
   order_in_session: z.number().int(),
+  // P23 fields
+  angle: ClimbAngleSchema.nullable(),
+  character_tags: z.array(ClimbCharacterSchema),
+  length_ft: z.number().int().nullable(),
+  effort: z.number().int().min(1).max(10).nullable(),
+  result: ClimbResultSchema.nullable(),
+  climb_notes: z.string().nullable(),
+  wall: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   deleted_at: z.string().nullable(),
@@ -451,6 +470,59 @@ export interface SorenessTrendRow {
   severity: number;
 }
 
+// ─── Climb progress views (P24) ──────────────────────────────────────────────
+
+export interface ClimbProgressionRow {
+  user_id: string;
+  month: string;
+  environment: ClimbEnvironment;
+  discipline: string | null;
+  max_grade_value: number;
+  max_grade_label: string | null;
+}
+
+export interface ClimbSendRateRow {
+  user_id: string;
+  month: string;
+  environment: ClimbEnvironment;
+  total_climbs: number;
+  total_attempts: number;
+  total_sends: number;
+  send_rate_pct: number | null;
+  onsight_count: number;
+  flash_count: number;
+  redpoint_count: number;
+  hung_count: number;
+  dnf_count: number;
+  no_result_count: number;
+}
+
+export interface ClimbVolumeRow {
+  user_id: string;
+  week_start: string;
+  sessions: number;
+  climbs: number;
+  total_attempts: number;
+}
+
+export interface ClimbByAngleRow {
+  user_id: string;
+  angle: ClimbAngle;
+  climb_count: number;
+  total_attempts: number;
+  total_sends: number;
+  send_rate_pct: number | null;
+}
+
+export interface ClimbByCharacterRow {
+  user_id: string;
+  tag: ClimbCharacter;
+  climb_count: number;
+  total_attempts: number;
+  total_sends: number;
+  send_rate_pct: number | null;
+}
+
 // ─── Composite input types (used by logging forms + action layer) ─────────────
 
 export interface LogRunInput {
@@ -476,6 +548,14 @@ export interface ClimbInput {
   route_name?: string | null;
   crag?: string | null;
   order_in_session?: number;
+  // P23 fields
+  angle?: ClimbAngle | null;
+  character_tags?: ClimbCharacter[];
+  length_ft?: number | null;
+  effort?: number | null;
+  result?: ClimbResult | null;
+  climb_notes?: string | null;
+  wall?: string | null;
 }
 
 export interface LogClimbSessionInput {

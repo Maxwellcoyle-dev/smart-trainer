@@ -5,6 +5,11 @@ import type {
   SorenessTrendRow,
   AdherenceRow,
   Proposal,
+  ClimbProgressionRow,
+  ClimbSendRateRow,
+  ClimbVolumeRow,
+  ClimbByAngleRow,
+  ClimbByCharacterRow,
 } from "@smart-trainer/core";
 import { api } from "./api.ts";
 
@@ -25,6 +30,7 @@ export interface ClimbPayload {
   occurred_at: string;
   duration_s?: number | null;
   session_rpe?: number | null;
+  location?: string | null;
   notes?: string | null;
   prescribed_session_id?: string | null;
   climbs: {
@@ -38,6 +44,13 @@ export interface ClimbPayload {
     route_name?: string | null;
     crag?: string | null;
     order_in_session?: number;
+    angle?: "slab" | "vertical" | "overhang" | "roof" | null;
+    character_tags?: ("powerful" | "endurance" | "technical" | "crimpy" | "dynamic")[];
+    length_ft?: number | null;
+    effort?: number | null;
+    result?: "onsight" | "flash" | "redpoint" | "hung" | "dnf" | null;
+    climb_notes?: string | null;
+    wall?: string | null;
   }[];
 }
 
@@ -94,6 +107,20 @@ export const useLogClimb = () => useLoggingMutation<ClimbPayload>("/logs/climb")
 export const useLogStrength = () => useLoggingMutation<StrengthPayload>("/logs/strength");
 export const useLogCheckIn = () => useLoggingMutation<CheckInPayload>("/logs/checkin");
 
+export interface ClimbPlaces {
+  gyms: string[];
+  crags: string[];
+  walls: string[];
+}
+
+export function useClimbPlaces() {
+  return useQuery({
+    queryKey: ["logs", "climb-places"],
+    queryFn: () => api.get<ClimbPlaces>("/logs/climb/places"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useSaveSkeleton() {
   const qc = useQueryClient();
   return useMutation({
@@ -140,6 +167,47 @@ export function useAdherence() {
   return useQuery({
     queryKey: ["metrics", "adherence"],
     queryFn: () => api.get<AdherenceRow[]>(`/metrics/adherence`),
+  });
+}
+
+// ─── Climb progress hooks (P24) ───────────────────────────────────────────────
+
+export function useClimbProgression(months = 12, environment?: string) {
+  const q = new URLSearchParams({ months: String(months) });
+  if (environment) q.set("environment", environment);
+  return useQuery({
+    queryKey: ["metrics", "climb-progression", months, environment ?? "all"],
+    queryFn: () => api.get<ClimbProgressionRow[]>(`/metrics/climb/progression?${q}`),
+  });
+}
+
+export function useClimbSendRate(months = 12, environment?: string) {
+  const q = new URLSearchParams({ months: String(months) });
+  if (environment) q.set("environment", environment);
+  return useQuery({
+    queryKey: ["metrics", "climb-send-rate", months, environment ?? "all"],
+    queryFn: () => api.get<ClimbSendRateRow[]>(`/metrics/climb/send-rate?${q}`),
+  });
+}
+
+export function useClimbVolume(weeks = 16) {
+  return useQuery({
+    queryKey: ["metrics", "climb-volume", weeks],
+    queryFn: () => api.get<ClimbVolumeRow[]>(`/metrics/climb/volume?weeks=${weeks}`),
+  });
+}
+
+export function useClimbByAngle() {
+  return useQuery({
+    queryKey: ["metrics", "climb-by-angle"],
+    queryFn: () => api.get<ClimbByAngleRow[]>(`/metrics/climb/by-angle`),
+  });
+}
+
+export function useClimbByCharacter() {
+  return useQuery({
+    queryKey: ["metrics", "climb-by-character"],
+    queryFn: () => api.get<ClimbByCharacterRow[]>(`/metrics/climb/by-character`),
   });
 }
 
