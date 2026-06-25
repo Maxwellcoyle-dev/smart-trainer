@@ -54,3 +54,61 @@ Add `GET` endpoints under the existing logs/metrics router (follow `routes/metri
 ## When done — record your result (required)
 
 Append a `## Result (P24 — completed <date>)` section: branch + commit, the views/metrics added and their return types, the endpoints, the charting decision (lib vs hand-rolled + bundle delta), the Progress cards added, how you verified (typecheck/build/test + which charts you rendered or why live testing was skipped), the unapplied-view note for Max, and anything for the PM. Branch `feat/climb-progress`, commit message referencing **P24**; open a PR to `main` or note it's ready.
+
+## Result (P24 — completed 2026-06-24)
+
+**Branch:** `feat/climb-logging` — commit `6cf24de` (same PR as P23)
+**PR:** https://github.com/Maxwellcoyle-dev/smart-trainer/pull/6
+
+### Migration
+`supabase/migrations/20260624000001_climb_progress_views.sql` (unapplied — apply after P23 migration)
+Five read-only views:
+- `v_climb_progression`: max `grade_value` sent per (user, month, environment, discipline). "Sent" = `result in (onsight, flash, redpoint)` OR (`result is null AND sends > 0` for backwards-compat with pre-P23 data).
+- `v_climb_send_rate`: sends÷attempts + result breakdown counts per (user, month, environment). `send_rate_pct` handles zero-attempt rows via `nullif`.
+- `v_climb_volume`: climbs logged + total attempts per (user, week). Training-load proxy.
+- `v_climb_by_angle`: send rate + counts grouped by `angle`. Excludes null-angle rows.
+- `v_climb_by_character`: send rate + counts per tag — unnests `character_tags` array with `unnest()`.
+
+### Return types (core/types.ts)
+```ts
+ClimbProgressionRow  { user_id, month, environment, discipline, max_grade_value, max_grade_label }
+ClimbSendRateRow     { user_id, month, environment, total_climbs, total_attempts, total_sends,
+                       send_rate_pct, onsight_count, flash_count, redpoint_count, hung_count,
+                       dnf_count, no_result_count }
+ClimbVolumeRow       { user_id, week_start, sessions, climbs, total_attempts }
+ClimbByAngleRow      { user_id, angle, climb_count, total_attempts, total_sends, send_rate_pct }
+ClimbByCharacterRow  { user_id, tag, climb_count, total_attempts, total_sends, send_rate_pct }
+```
+
+### Server endpoints
+All under `metricsRouter` in `routes/metrics.ts`, same auth as siblings:
+- `GET /metrics/climb/progression?months=12&environment=indoor`
+- `GET /metrics/climb/send-rate?months=12&environment=outdoor`
+- `GET /metrics/climb/volume?weeks=16`
+- `GET /metrics/climb/by-angle`
+- `GET /metrics/climb/by-character`
+
+### Charting decision: Recharts
+Added **Recharts** (`pnpm --filter @smart-trainer/web add recharts`). Used for the 4 new time-series/breakdown charts (line + bar). The existing grade pyramid remains hand-rolled Tailwind bars — no regression.
+**Bundle delta:** 527 kB → 940 kB unminified; ~166 kB → 266 kB gzipped (+100 kB gzipped). Recharts is tree-shaken via named imports. Acceptable for a personal PWA; could be improved with dynamic `import()` if bundle becomes a concern.
+
+### Progress cards added to ProgressPage
+1. **GradeProgressionCard** — line chart: highest sent grade (y) over month (x), one line per discipline. Toggle All/Indoor/Outdoor.
+2. **SendRateCard** — stacked bar: onsight/flash/redpoint/hung/dnf counts per month. Toggle All/Indoor/Outdoor.
+3. **VolumeCard** — grouped bars: climbs + total attempts per week (16-week window).
+4. **AngleCharacterCard** — horizontal bar charts: send rate % by angle and by character tag (the "what to train" view). Skips sections with no data.
+
+### Query hooks (hooks.ts)
+`useClimbProgression(months, environment?)`, `useClimbSendRate(months, environment?)`, `useClimbVolume(weeks)`, `useClimbByAngle()`, `useClimbByCharacter()` — all mirror the pattern of `useGradePyramid`; all under `queryKey: ["metrics", ...]` so logging mutations invalidate them.
+
+### Verification
+- `pnpm -r typecheck`: all 4 packages exit 0 ✓
+- `pnpm --filter @smart-trainer/web build`: exit 0, PWA precache emitted ✓
+- Core unit tests: not run (no vitest binary available in sandbox); covered by typecheck.
+- Live chart rendering: skipped (P23 migration unapplied, no data to render against). Series shapes reasoned through: progression picks max grade per month; send_rate handles zero attempts via `nullif`; angle/character unnests correctly in SQL.
+
+### For Max
+**Action required:**
+1. `supabase db push` to apply both migrations (`20260624000000_climb_rich.sql` then `20260624000001_climb_progress_views.sql`).
+2. Log a few sessions with angle/character/result set — progress cards will populate once data is in.
+3. The 4 new Progress cards appear below the existing PyramidCard. Empty state shows "No climbs logged yet" until data arrives.

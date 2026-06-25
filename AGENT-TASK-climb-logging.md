@@ -110,3 +110,48 @@ Add new enums and columns. Do **not** edit existing migrations (the ledger is no
 ## When done — record your result (required)
 
 Append a `## Result (P23 — completed <date>)` section to the bottom of THIS file: branch + commit hash, the migration filename + new enums/columns, the core/server/mcp/web changes, how the venue/wall autocomplete works, how propose/apply and attempts/sends-plus-result coexist, how you verified (typecheck/build/test exit codes + which sessions you logged or why live testing was skipped), the fact that the migration is unapplied and needs Max to push it, and anything for the PM / for P24 (which columns it should graph). Branch `feat/climb-logging`, commit message referencing **P23**; open a PR to `main` or note it's ready.
+
+## Result (P23 — completed 2026-06-24)
+
+**Branch:** `feat/climb-logging` — commit `6cf24de`
+**PR:** https://github.com/Maxwellcoyle-dev/smart-trainer/pull/6
+
+### Migration
+`supabase/migrations/20260624000000_climb_rich.sql` (unapplied — needs `supabase db push`)
+- New enums: `climb_angle` (slab/vertical/overhang/roof), `climb_character` (powerful/endurance/technical/crimpy/dynamic), `climb_result` (onsight/flash/redpoint/hung/dnf)
+- New columns on `climbs`: `angle climb_angle`, `character_tags climb_character[] default '{}'`, `length_ft smallint`, `effort smallint check(1–10)`, `result climb_result`, `climb_notes text`, `wall text`
+- Indexes: `idx_climbs_result`, `idx_climbs_angle`, `idx_climbs_character_tags` (GIN)
+- Existing columns (`attempts`, `sends`, `crag`, `style`, `environment`) untouched
+
+### Core
+- `types.ts`: Added `ClimbAngleSchema`, `ClimbCharacterSchema`, `ClimbResultSchema` zod enums + types. Extended `ClimbSchema` and `ClimbInput` with all 7 new fields (all optional/nullable on input).
+- `actions/writes.ts`: `logClimbSession` maps all new fields into the bulk `climbs` insert; defaults `character_tags` to `[]`. Propose/apply branch unchanged.
+- `actions/reads.ts`: Added `getClimbPlaces(db, userId, limit=25)` → `{ gyms, crags, walls }` — distinct venue strings from session history, ordered by recency, deduped and capped at 25 each.
+
+### Server
+- `routes/logs.ts`: `ClimbBody` per-climb object extended with all P23 fields. `GET /logs/climb/places` endpoint calls `getClimbPlaces` and returns the autocomplete payload.
+
+### MCP
+- `mcp/src/index.ts`: `log_climb_session` tool extended with `location` (session-level) and all 7 per-climb P23 fields.
+
+### Web
+- `packages/web/src/lib/hooks.ts`: `ClimbPayload` extended with `location` + all per-climb P23 fields. Added `useClimbPlaces()` query hook (5-min stale time).
+- `packages/web/src/components/logging/ClimbLogForm.tsx`: Full redesign:
+  - **Session header**: environment toggle (indoor/outdoor), venue free-text input with `<datalist>` from `useClimbPlaces()` (relabeled "Gym" / "Crag / Area"), wall/sector input with its own datalist.
+  - **Per-climb rows**: collapsible — collapsed shows grade + result badge + angle; expanded shows discipline, angle chips, character multi-select chips, result chips, attempts/sends steppers, length input, per-climb 1–10 effort picker, route name, per-climb notes.
+  - Defensive defaults: `angle: null`, `character_tags: []`, `result: null`, attempts 1 / sends 1.
+  - On submit: `crag` set from session location for outdoor sessions; `wall` passed for all environments.
+
+### How propose/apply and attempts/sends+result coexist
+The `diff.after` in propose mode carries the full `input` object (including new fields). In apply mode, both `attempts`/`sends` counters and `result` are stored on each climb row — counters track volume ("3 goes"), `result` captures outcome. The climb form drives `sends` automatically but lets the user pick `result` independently.
+
+### Verification
+- `pnpm -r typecheck`: all 4 packages exit 0 ✓
+- `pnpm --filter @smart-trainer/web build`: exit 0 ✓
+- Live testing skipped (migration unapplied; no local Supabase running)
+
+### For Max
+**Action required:** run `supabase db push` (or equivalent) to apply `20260624000000_climb_rich.sql` before end-to-end testing. After that, the new form fields and autocomplete should work immediately with P23 data.
+
+### For P24
+P24 can graph: `angle` (4-way send-rate breakdown), `character_tags` (unnested tag breakdown), `result` (onsight/flash/redpoint/hung/dnf mix over time), `grade_value` progression filtered by `result in (onsight, flash, redpoint)`, `length_ft` distribution, `effort` vs grade correlation.
