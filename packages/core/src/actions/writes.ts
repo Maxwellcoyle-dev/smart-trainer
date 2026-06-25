@@ -220,6 +220,13 @@ export async function logClimbSession(
       route_name: c.route_name ?? null,
       crag: c.crag ?? null,
       order_in_session: c.order_in_session ?? i,
+      angle: c.angle ?? null,
+      character_tags: c.character_tags ?? [],
+      length_ft: c.length_ft ?? null,
+      effort: c.effort ?? null,
+      result: c.result ?? null,
+      climb_notes: c.climb_notes ?? null,
+      wall: c.wall ?? null,
     }));
     const { data, error } = await db.from("climbs").insert(rows).select();
     if (error) throw error;

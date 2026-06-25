@@ -21,6 +21,11 @@ import type {
   GradePyramidRow,
   AdherenceRow,
   SorenessTrendRow,
+  ClimbProgressionRow,
+  ClimbSendRateRow,
+  ClimbVolumeRow,
+  ClimbByAngleRow,
+  ClimbByCharacterRow,
 } from "../types.js";
 
 export async function getProfile(db: SupabaseClient, userId: string): Promise<Profile | null> {
@@ -233,6 +238,71 @@ export async function getAdherence(
   return data ?? [];
 }
 
+export interface ClimbPlaces {
+  gyms: string[];
+  crags: string[];
+  walls: string[];
+}
+
+export async function getClimbPlaces(
+  db: SupabaseClient,
+  userId: string,
+  limit = 25
+): Promise<ClimbPlaces> {
+  // Gyms: distinct session locations for indoor climb sessions, newest first
+  const { data: gymRows, error: gymErr } = await db
+    .from("sessions")
+    .select("location")
+    .eq("user_id", userId)
+    .eq("sport", "climb")
+    .not("location", "is", null)
+    .order("occurred_at", { ascending: false })
+    .limit(200);
+  if (gymErr) throw gymErr;
+
+  // Crags: distinct crag values on climbs for outdoor sessions
+  const { data: cragRows, error: cragErr } = await db
+    .from("climbs")
+    .select("crag")
+    .eq("user_id", userId)
+    .eq("environment", "outdoor")
+    .not("crag", "is", null)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (cragErr) throw cragErr;
+
+  // Walls: distinct wall values on climbs
+  const { data: wallRows, error: wallErr } = await db
+    .from("climbs")
+    .select("wall")
+    .eq("user_id", userId)
+    .not("wall", "is", null)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (wallErr) throw wallErr;
+
+  function dedup(values: (string | null)[], cap: number): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const v of values) {
+      if (v && !seen.has(v)) {
+        seen.add(v);
+        out.push(v);
+        if (out.length >= cap) break;
+      }
+    }
+    return out;
+  }
+
+  return {
+    gyms: dedup((gymRows ?? []).map((r) => (r as { location: string | null }).location), limit),
+    crags: dedup((cragRows ?? []).map((r) => (r as { crag: string | null }).crag), limit),
+    walls: dedup((wallRows ?? []).map((r) => (r as { wall: string | null }).wall), limit),
+  };
+}
+
 export async function getSorenessTrend(
   db: SupabaseClient,
   userId: string,
@@ -244,6 +314,88 @@ export async function getSorenessTrend(
     .select("*")
     .eq("user_id", userId)
     .gte("check_in_date", from);
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ─── Climb progress metrics (P24) ────────────────────────────────────────────
+
+export async function getClimbProgression(
+  db: SupabaseClient,
+  userId: string,
+  opts?: { months?: number; environment?: string }
+): Promise<ClimbProgressionRow[]> {
+  const months = opts?.months ?? 12;
+  const from = new Date(Date.now() - months * 30 * 86400_000).toISOString().slice(0, 10);
+  let q = db
+    .from("v_climb_progression")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("month", from)
+    .order("month");
+  if (opts?.environment) q = q.eq("environment", opts.environment);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getClimbSendRate(
+  db: SupabaseClient,
+  userId: string,
+  opts?: { months?: number; environment?: string }
+): Promise<ClimbSendRateRow[]> {
+  const months = opts?.months ?? 12;
+  const from = new Date(Date.now() - months * 30 * 86400_000).toISOString().slice(0, 10);
+  let q = db
+    .from("v_climb_send_rate")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("month", from)
+    .order("month");
+  if (opts?.environment) q = q.eq("environment", opts.environment);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getClimbVolume(
+  db: SupabaseClient,
+  userId: string,
+  weeks = 16
+): Promise<ClimbVolumeRow[]> {
+  const from = new Date(Date.now() - weeks * 7 * 86400_000).toISOString().slice(0, 10);
+  const { data, error } = await db
+    .from("v_climb_volume")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("week_start", from)
+    .order("week_start");
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getClimbByAngle(
+  db: SupabaseClient,
+  userId: string
+): Promise<ClimbByAngleRow[]> {
+  const { data, error } = await db
+    .from("v_climb_by_angle")
+    .select("*")
+    .eq("user_id", userId)
+    .order("climb_count", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function getClimbByCharacter(
+  db: SupabaseClient,
+  userId: string
+): Promise<ClimbByCharacterRow[]> {
+  const { data, error } = await db
+    .from("v_climb_by_character")
+    .select("*")
+    .eq("user_id", userId)
+    .order("climb_count", { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
