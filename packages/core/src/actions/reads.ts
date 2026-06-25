@@ -11,6 +11,7 @@ import type {
   Session,
   RunDetails,
   Climb,
+  Grade,
   StrengthSet,
   CheckIn,
   SorenessEntry,
@@ -234,6 +235,17 @@ export async function getAdherence(
     .eq("user_id", userId)
     .order("start_date", { ascending: false })
     .limit(12);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Climbing grade reference (YDS rope + V-scale boulder), ordered for dropdowns. */
+export async function getGrades(db: SupabaseClient): Promise<Grade[]> {
+  const { data, error } = await db
+    .from("grades")
+    .select("id, system, label, grade_value, discipline")
+    .order("discipline", { ascending: true })
+    .order("grade_value", { ascending: true });
   if (error) throw error;
   return data ?? [];
 }

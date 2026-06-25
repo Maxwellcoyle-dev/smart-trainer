@@ -10,6 +10,7 @@ import type {
   ClimbVolumeRow,
   ClimbByAngleRow,
   ClimbByCharacterRow,
+  Grade,
 } from "@smart-trainer/core";
 import { api } from "./api.ts";
 
@@ -118,6 +119,14 @@ export function useClimbPlaces() {
     queryKey: ["logs", "climb-places"],
     queryFn: () => api.get<ClimbPlaces>("/logs/climb/places"),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useGrades() {
+  return useQuery({
+    queryKey: ["logs", "grades"],
+    queryFn: () => api.get<Grade[]>("/logs/grades"),
+    staleTime: 60 * 60 * 1000, // reference data — rarely changes
   });
 }
 

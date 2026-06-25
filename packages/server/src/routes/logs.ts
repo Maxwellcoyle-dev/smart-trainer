@@ -7,6 +7,7 @@ import {
   logStrength,
   logCheckIn,
   getClimbPlaces,
+  getGrades,
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
@@ -124,4 +125,10 @@ logsRouter.get("/climb/places", async (c) => {
   const userId = c.get("userId");
   const places = await getClimbPlaces(db, userId);
   return c.json(places);
+});
+
+logsRouter.get("/grades", async (c) => {
+  const db = c.get("supabase");
+  const grades = await getGrades(db);
+  return c.json(grades);
 });

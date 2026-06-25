@@ -103,3 +103,12 @@ from climbs c,
   unnest(c.character_tags) as tag
 where c.deleted_at is null
 group by c.user_id, tag;
+
+-- ─── Security ─────────────────────────────────────────────────────────────────
+-- Views use security_invoker so base-table (climbs/sessions) RLS applies to the
+-- querying user, not the view owner. Matches the pattern in 20260617170013_rls.sql.
+alter view v_climb_progression  set (security_invoker = on);
+alter view v_climb_send_rate    set (security_invoker = on);
+alter view v_climb_volume       set (security_invoker = on);
+alter view v_climb_by_angle     set (security_invoker = on);
+alter view v_climb_by_character set (security_invoker = on);
