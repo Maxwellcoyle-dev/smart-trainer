@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { RpeSlider, Field, SubmitButton } from "./shared.tsx";
-import type { ClimbStyle, ClimbEnvironment, ClimbAngle, ClimbCharacter, ClimbResult } from "@smart-trainer/core";
-import { useLogClimb, useClimbPlaces } from "../../lib/hooks.ts";
+import type { ClimbStyle, ClimbEnvironment, ClimbAngle, ClimbCharacter, ClimbResult, Grade } from "@smart-trainer/core";
+import { useLogClimb, useClimbPlaces, useGrades } from "../../lib/hooks.ts";
 
 interface ClimbEntry {
   grade_label: string;
+  grade_value: number | null;
+  grade_id: string | null;
   style: ClimbStyle;
   attempts: number;
   sends: number;
@@ -34,12 +36,15 @@ const CHAR_LABELS: Record<ClimbCharacter, string> = {
 };
 
 const RESULTS: { value: ClimbResult; label: string }[] = [
-  { value: "onsight", label: "OS" },
+  { value: "onsight", label: "Onsight" },
   { value: "flash", label: "Flash" },
-  { value: "redpoint", label: "RP" },
-  { value: "hung", label: "Hung" },
+  { value: "redpoint", label: "Redpoint" },
+  { value: "hung", label: "Fell / hung" },
   { value: "dnf", label: "DNF" },
 ];
+
+const DISCIPLINE_FOR_STYLE = (style: ClimbStyle): "rope" | "boulder" =>
+  style === "boulder" ? "boulder" : "rope";
 
 const RESULT_COLORS: Record<ClimbResult, string> = {
   onsight: "bg-green-700 text-green-100",
@@ -49,15 +54,35 @@ const RESULT_COLORS: Record<ClimbResult, string> = {
   dnf: "bg-surface2 text-muted",
 };
 
+const RESULT_BADGE: Record<ClimbResult, string> = {
+  onsight: "OS", flash: "Flash", redpoint: "RP", hung: "Hung", dnf: "DNF",
+};
+
 function ClimbRow({
   climb,
+  grades,
   onChange,
   onRemove,
 }: {
   climb: ClimbEntry;
+  grades: Grade[];
   onChange: (c: ClimbEntry) => void;
   onRemove: () => void;
 }) {
+  const discipline = DISCIPLINE_FOR_STYLE(climb.style);
+  const gradeOptions = grades.filter((g) => g.discipline === discipline);
+
+  function selectGrade(id: string) {
+    const g = gradeOptions.find((x) => x.id === id);
+    onChange({
+      ...climb,
+      grade_id: g?.id ?? null,
+      grade_label: g?.label ?? "",
+      grade_value: g?.grade_value ?? null,
+      expanded: true,
+    });
+  }
+
   const hasGrade = climb.grade_label.trim().length > 0;
   const canCollapse = hasGrade && climb.result !== null;
 
@@ -67,7 +92,7 @@ function ClimbRow({
 
   const resultBadge = climb.result ? (
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${RESULT_COLORS[climb.result]}`}>
-      {RESULTS.find((r) => r.value === climb.result)?.label}
+      {RESULT_BADGE[climb.result]}
     </span>
   ) : null;
 
@@ -82,14 +107,21 @@ function ClimbRow({
         className="flex gap-2 items-center p-3"
         onClick={canCollapse ? toggleExpand : undefined}
       >
-        <input
-          type="text"
-          value={climb.grade_label}
-          onChange={(e) => onChange({ ...climb, grade_label: e.target.value, expanded: true })}
+        <select
+          value={climb.grade_id ?? ""}
+          onChange={(e) => selectGrade(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          placeholder="5.11a / V4 / 7a"
-          className="flex-1 bg-surface rounded-lg px-3 py-2 text-sm outline-none placeholder:text-muted"
-        />
+          className={`flex-1 bg-surface rounded-lg px-3 py-2 text-sm outline-none ${
+            hasGrade ? "text-text" : "text-muted"
+          }`}
+        >
+          <option value="">
+            {grades.length === 0 ? "Loading grades…" : "Select grade…"}
+          </option>
+          {gradeOptions.map((g) => (
+            <option key={g.id} value={g.id}>{g.label}</option>
+          ))}
+        </select>
         {!climb.expanded && (
           <div className="flex items-center gap-1.5">
             {resultBadge}
@@ -123,7 +155,15 @@ function ClimbRow({
               <button
                 key={s}
                 type="button"
-                onClick={() => onChange({ ...climb, style: s })}
+                onClick={() => {
+                  const disciplineChanged =
+                    DISCIPLINE_FOR_STYLE(s) !== DISCIPLINE_FOR_STYLE(climb.style);
+                  onChange(
+                    disciplineChanged
+                      ? { ...climb, style: s, grade_id: null, grade_label: "", grade_value: null }
+                      : { ...climb, style: s }
+                  );
+                }}
                 className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   climb.style === s ? "bg-accent text-white" : "bg-surface text-muted"
                 }`}
@@ -179,16 +219,16 @@ function ClimbRow({
             </div>
           </div>
 
-          {/* Result */}
+          {/* Result — type of send */}
           <div>
-            <p className="text-xs text-muted mb-1 uppercase tracking-wider">Result</p>
-            <div className="flex gap-1">
+            <p className="text-xs text-muted mb-1 uppercase tracking-wider">Result (type of send)</p>
+            <div className="flex gap-1.5 flex-wrap">
               {RESULTS.map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => onChange({ ...climb, result: climb.result === value ? null : value })}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                     climb.result === value
                       ? RESULT_COLORS[value]
                       : "bg-surface text-muted"
@@ -304,6 +344,8 @@ function ClimbRow({
 
 const newClimb = (): ClimbEntry => ({
   grade_label: "",
+  grade_value: null,
+  grade_id: null,
   style: "sport",
   attempts: 1,
   sends: 1,
@@ -320,6 +362,7 @@ const newClimb = (): ClimbEntry => ({
 export function ClimbLogForm() {
   const logClimb = useLogClimb();
   const { data: places } = useClimbPlaces();
+  const { data: grades } = useGrades();
   const [environment, setEnvironment] = useState<ClimbEnvironment>("indoor");
   const [location, setLocation] = useState("");
   const [wall, setWall] = useState("");
@@ -348,6 +391,8 @@ export function ClimbLogForm() {
         notes: notes.trim() || null,
         climbs: valid.map((c, i) => ({
           grade_label: c.grade_label.trim(),
+          grade_value: c.grade_value,
+          grade_id: c.grade_id,
           style: c.style,
           environment,
           attempts: c.attempts,
@@ -442,6 +487,7 @@ export function ClimbLogForm() {
           <ClimbRow
             key={i}
             climb={c}
+            grades={grades ?? []}
             onChange={(u) => updateClimb(i, u)}
             onRemove={() => setClimbs((cs) => cs.filter((_, j) => j !== i))}
           />
