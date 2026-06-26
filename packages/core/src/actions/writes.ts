@@ -27,6 +27,8 @@ import type {
   Goal,
   CreateGoalInput,
   UpdateGoalInput,
+  Availability,
+  Profile,
 } from "../types.js";
 import { getProfile } from "./reads.js";
 
@@ -64,7 +66,7 @@ async function appendAdaptationLog(
   return (data as { id: string }).id;
 }
 
-async function createProposal(
+export async function createProposal(
   db: SupabaseClient,
   userId: string,
   source: WriteSource,
@@ -1098,4 +1100,54 @@ export async function deleteGoal(
   }, "Goal soft-deleted");
 
   return data as Goal;
+}
+
+// ─── Profile: availability (G1 intake, design §3) ─────────────────────────────
+
+/**
+ * Persist the user's default training availability onto their profile.
+ *
+ * This is user-owned configuration (the frame the user controls — Principle 3),
+ * so it writes directly rather than going through the proposal queue. It does
+ * NOT touch any active plan: availability is *snapshotted* into the plan at
+ * generation time, so editing it here never silently rewrites a live plan.
+ *
+ * `availability` is expected to be schema-valid (validate with AvailabilitySchema
+ * at the API boundary before calling).
+ */
+export async function setAvailability(
+  db: SupabaseClient,
+  userId: string,
+  availability: Availability
+): Promise<Profile> {
+  const { data, error } = await db
+    .from("profiles")
+    .update({ availability })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Profile;
+}
+
+/**
+ * Set the user's adaptation autonomy level (design §5.3), merged into the
+ * existing `profiles.preferences` JSONB so other preferences are preserved.
+ *   "conservative" → propose everything · "balanced" → auto-minor, propose-major.
+ */
+export async function setAutonomy(
+  db: SupabaseClient,
+  userId: string,
+  autonomy: "conservative" | "balanced"
+): Promise<Profile> {
+  const profile = await getProfile(db, userId);
+  const preferences = { ...(profile?.preferences ?? {}), autonomy };
+  const { data, error } = await db
+    .from("profiles")
+    .update({ preferences })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Profile;
 }

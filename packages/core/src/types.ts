@@ -75,6 +75,39 @@ export const AiJobStatusSchema = z.enum([
 ]);
 export type AiJobStatus = z.infer<typeof AiJobStatusSchema>;
 
+// ─── Availability (design §3) ───────────────────────────────────────────────
+// Canonical source of truth for the shape the periodization engine consumes.
+// Persisted as profiles.availability (default) and snapshotted into
+// plans.availability at generation time.
+
+export const PerSportAvailabilitySchema = z.object({
+  max_days: z.number().int().min(0).max(7),
+  min_rest_days_between: z.number().int().min(0).max(7),
+  allow_back_to_back: z.boolean().optional(),
+});
+export type PerSportAvailability = z.infer<typeof PerSportAvailabilitySchema>;
+
+export const AvailabilitySchema = z.object({
+  days_per_week: z.number().int().min(1).max(7),
+  hours_per_day: z.number().positive().max(24),
+  blackout_dow: z.array(z.number().int().min(0).max(6)).default([]), // 0 = Mon … 6 = Sun
+  per_sport: z.record(SportTypeSchema, PerSportAvailabilitySchema).default({}),
+  notes: z.string().nullable().optional(),
+});
+export type Availability = z.infer<typeof AvailabilitySchema>;
+
+// ─── Goal target (design §3) ────────────────────────────────────────────────
+// Standardized goals.target JSONB shape the engine reads via readGoalTarget().
+
+export const GoalTargetSchema = z.object({
+  metric: z.enum(["distance", "grade", "pace", "duration", "adherence"]),
+  value: z.union([z.number(), z.string()]),
+  unit: z.string().optional(),
+  by_date: z.string().optional(),
+  gated_by: z.array(z.string()).optional(),
+});
+export type GoalTarget = z.infer<typeof GoalTargetSchema>;
+
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
 export const ProfileSchema = z.object({
@@ -87,6 +120,7 @@ export const ProfileSchema = z.object({
   equipment: z.record(z.string(), z.unknown()),
   watch_list: z.array(BodyPartSchema),
   preferences: z.record(z.string(), z.unknown()),
+  availability: z.record(z.string(), z.unknown()).default({}),
   created_at: z.string(),
   updated_at: z.string(),
 });

@@ -2,6 +2,19 @@ import { supabase } from "./supabase.ts";
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
+// Guard: if VITE_API_URL is missing at build time, API_URL is "" and every
+// request falls back to the SPA's own origin. Reads then return index.html
+// (HTML, not JSON) and writes (POST/PUT/PATCH) get a confusing 405 from the
+// static host (e.g. Vercel). Surface this loudly instead of as a cryptic 405.
+if (!API_URL && import.meta.env.PROD) {
+  console.error(
+    "[api] VITE_API_URL is empty in this production build. API calls will hit " +
+      "the static host; POSTs will return 405. Set VITE_API_URL (the server's " +
+      "URL, e.g. https://smart-trainer-production.up.railway.app) in the Vercel " +
+      "project's Production environment and redeploy."
+  );
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -21,6 +34,14 @@ async function request<T>(
   path: string,
   body?: unknown
 ): Promise<T> {
+  if (!API_URL) {
+    throw new ApiError(
+      0,
+      "API base URL is not configured (VITE_API_URL missing in this build). " +
+        "Set it in the deployment environment and redeploy."
+    );
+  }
+
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
 
