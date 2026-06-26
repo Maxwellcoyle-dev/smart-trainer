@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { SportType, AdaptationDiff } from "@smart-trainer/core";
 import { ProposalDiff } from "../components/plan/ProposalDiff.tsx";
 import type { Goal } from "../lib/hooks.ts";
@@ -43,6 +44,7 @@ interface SlotDraft {
 }
 
 export function PlanPage() {
+  const navigate = useNavigate();
   const { data: skeleton } = useSkeleton();
   const saveSkeleton = useSaveSkeleton();
   const { data: proposals } = usePendingProposals();
@@ -135,6 +137,17 @@ export function PlanPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-2xl font-bold pt-2">Plan</h1>
+
+      {/* Generate-a-plan CTA → intake wizard */}
+      <button
+        onClick={() => navigate("/setup")}
+        className="w-full bg-gradient-to-r from-accent to-accent2 rounded-2xl p-4 text-left active:opacity-90"
+      >
+        <p className="text-white font-semibold">✨ Generate a plan</p>
+        <p className="text-white/80 text-xs mt-0.5">
+          Set goals + availability and let the engine periodize it for you
+        </p>
+      </button>
 
       {/* Week skeleton editor */}
       <div className="bg-surface rounded-2xl p-4">

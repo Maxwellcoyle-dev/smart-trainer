@@ -29,5 +29,11 @@ secrets.json
 supabase/.temp
 supabase/.branches
 
+# Vite/Vitest config compile artifacts
+*.timestamp-*.mjs
+
+# Stray temp files
+_tmp_*
+
 # OS / editor cruft
 .DS_Store

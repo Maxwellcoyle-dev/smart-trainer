@@ -4,6 +4,7 @@ import { HomePage } from "./pages/HomePage.tsx";
 import { LogPage } from "./pages/LogPage.tsx";
 import { ProgressPage } from "./pages/ProgressPage.tsx";
 import { PlanPage } from "./pages/PlanPage.tsx";
+import { SetupPage } from "./pages/SetupPage.tsx";
 import { CoachPage } from "./pages/CoachPage.tsx";
 import { useAuth } from "./auth/AuthProvider.tsx";
 import { LoginScreen } from "./auth/LoginScreen.tsx";
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="/log" element={<LogPage />} />
           <Route path="/progress" element={<ProgressPage />} />
           <Route path="/plan" element={<PlanPage />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route path="/coach" element={<CoachPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

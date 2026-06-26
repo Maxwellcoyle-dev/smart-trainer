@@ -332,6 +332,7 @@ export function useCreateGoal() {
       sport?: string | null;
       target_date?: string | null;
       priority?: number;
+      target?: Record<string, unknown>;
       notes?: string | null;
     }) => api.post<Goal>("/plan/goals", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
@@ -369,6 +370,65 @@ export function useFillWeek() {
   return useMutation({
     mutationFn: (planWeekId: string) =>
       api.post("/plan/fill-week", { plan_week_id: planWeekId, mode: "propose" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["proposals"] });
+      qc.invalidateQueries({ queryKey: ["plan"] });
+    },
+  });
+}
+
+// ─── Profile / availability (G1 intake) ──────────────────────────────────────
+
+export interface PerSportAvailability {
+  max_days: number;
+  min_rest_days_between: number;
+  allow_back_to_back?: boolean;
+}
+
+export interface Availability {
+  days_per_week: number;
+  hours_per_day: number;
+  blackout_dow: number[]; // 0 = Mon … 6 = Sun
+  per_sport: Record<string, PerSportAvailability>;
+  notes?: string | null;
+}
+
+export interface Profile {
+  id: string;
+  display_name: string | null;
+  injury_history: string | null;
+  watch_list: string[];
+  availability: Availability | Record<string, never>;
+  preferences: Record<string, unknown>;
+}
+
+export function useProfile() {
+  return useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api.get<Profile | null>("/profile"),
+  });
+}
+
+export function useSetAvailability() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (availability: Availability) =>
+      api.put<Profile>("/profile/availability", availability),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+}
+
+/**
+ * Whole-plan generation (design §4). Hits the Stage-1 engine + Stage-2
+ * personalization on the server, which lands the result as a single proposal.
+ * Endpoint is added in G3; the wizard surfaces a friendly message until then.
+ */
+export function useGeneratePlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name?: string }) => api.post("/plan/generate", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proposals"] });
       qc.invalidateQueries({ queryKey: ["plan"] });

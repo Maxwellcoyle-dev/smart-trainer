@@ -5,3 +5,7 @@ export * from "./actions/reads.js";
 export * from "./actions/writes.js";
 export * from "./actions/apply.js";
 export { shouldRaiseFlag } from "./actions/policy.js";
+export * from "./engine/periodization.js";
+export * from "./engine/generate.js";
+export * from "./engine/adaptation.js";
+export * from "./actions/adaptation.js";

@@ -16,8 +16,28 @@ import {
   GoalKindSchema,
   GoalStatusSchema,
 } from "@smart-trainer/core";
+import { generatePlanProposal, GenerateError } from "../generate.js";
 
 export const planRouter = new Hono();
+
+const GenerateBody = z.object({
+  name: z.string().optional(),
+});
+
+// Whole-plan generation (design §4): engine + personalization → one proposal.
+planRouter.post("/generate", zValidator("json", GenerateBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  try {
+    const proposal = await generatePlanProposal(db, userId, c.req.valid("json"));
+    return c.json(proposal, 201);
+  } catch (e) {
+    if (e instanceof GenerateError) {
+      return c.json({ error: e.message }, e.status as 400 | 500);
+    }
+    throw e;
+  }
+});
 
 const CreatePlanBody = z.object({
   name: z.string().min(1),

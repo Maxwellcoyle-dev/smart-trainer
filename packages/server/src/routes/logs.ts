@@ -7,6 +7,7 @@ import {
   logStrength,
   logCheckIn,
   getClimbPlaces,
+  runAdaptation,
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
@@ -15,9 +16,46 @@ import {
   ClimbResultSchema,
   BodyPartSchema,
   BodySideSchema,
+  type SupabaseClient,
+  type AdaptationEvent,
+  type InjuryFlag,
 } from "@smart-trainer/core";
 
 export const logsRouter = new Hono();
+
+/** Compact summary of what the adaptation hook did, for the client to surface. */
+interface AdaptationSummary {
+  outcome: "applied" | "proposed" | "skipped";
+  action_type: string;
+  tier: string;
+  notify?: string;
+  log_id?: string;
+  proposal_id?: string;
+}
+
+/**
+ * Fire the adaptation hook after a write (design §5: runs after the log).
+ * Error-isolated — a hook failure must never fail the log it followed.
+ */
+async function fireAdaptation(
+  db: SupabaseClient,
+  userId: string,
+  event: AdaptationEvent
+): Promise<AdaptationSummary | null> {
+  try {
+    const r = await runAdaptation(db, userId, event);
+    return {
+      outcome: r.outcome,
+      action_type: r.decision.action_type,
+      tier: r.decision.tier,
+      notify: r.notify,
+      log_id: r.log_id,
+      proposal_id: r.proposal?.id,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const RunBody = z.object({
   occurred_at: z.string(),
@@ -94,29 +132,53 @@ const CheckInBody = z.object({
 logsRouter.post("/run", zValidator("json", RunBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const result = await logRun(db, userId, c.req.valid("json"));
-  return c.json(result, 201);
+  const body = c.req.valid("json");
+  const result = await logRun(db, userId, body);
+  const adaptation = await fireAdaptation(db, userId, {
+    type: "session.logged",
+    prescribed_session_id: body.prescribed_session_id ?? null,
+    logged: { sport: "run", session_rpe: body.session_rpe ?? null },
+  });
+  return c.json({ ...result, adaptation }, 201);
 });
 
 logsRouter.post("/climb", zValidator("json", ClimbBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const result = await logClimbSession(db, userId, c.req.valid("json"));
-  return c.json(result, 201);
+  const body = c.req.valid("json");
+  const result = await logClimbSession(db, userId, body);
+  const adaptation = await fireAdaptation(db, userId, {
+    type: "session.logged",
+    prescribed_session_id: body.prescribed_session_id ?? null,
+    logged: { sport: "climb", session_rpe: body.session_rpe ?? null },
+  });
+  return c.json({ ...result, adaptation }, 201);
 });
 
 logsRouter.post("/strength", zValidator("json", StrengthBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
-  const result = await logStrength(db, userId, c.req.valid("json"));
-  return c.json(result, 201);
+  const body = c.req.valid("json");
+  const result = await logStrength(db, userId, body);
+  const adaptation = await fireAdaptation(db, userId, {
+    type: "session.logged",
+    prescribed_session_id: body.prescribed_session_id ?? null,
+    logged: { sport: "strength", session_rpe: body.session_rpe ?? null },
+  });
+  return c.json({ ...result, adaptation }, 201);
 });
 
 logsRouter.post("/checkin", zValidator("json", CheckInBody), async (c) => {
   const db = c.get("supabase");
   const userId = c.get("userId");
   const result = await logCheckIn(db, userId, c.req.valid("json"));
-  return c.json(result, 201);
+  // Flags newly raised/escalated this check-in drive the adaptation hook.
+  const raised: InjuryFlag[] = result.raised_flags ?? [];
+  const adaptation =
+    raised.length > 0
+      ? await fireAdaptation(db, userId, { type: "checkin.submitted", raised_flags: raised })
+      : null;
+  return c.json({ ...result, adaptation }, 201);
 });
 
 logsRouter.get("/climb/places", async (c) => {

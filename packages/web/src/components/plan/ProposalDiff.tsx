@@ -85,6 +85,19 @@ function SingleDiff({ diff }: { diff: AdaptationDiff }) {
   );
 }
 
+/** "1 plan, 4 phases, 12 weeks, 46 sessions" — a legible breakdown by entity type. */
+function summarizeByEntity(diffs: AdaptationDiff[]): string {
+  const counts = new Map<string, number>();
+  for (const d of diffs) counts.set(d.entity_type, (counts.get(d.entity_type) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([type, n]) => {
+      const label = humanizeEntityType(type).toLowerCase();
+      const noun = n === 1 ? label.replace(/s$/, "") : label;
+      return `${n} ${noun}`;
+    })
+    .join(", ");
+}
+
 interface Props {
   diff: AdaptationDiff | AdaptationDiff[];
 }
@@ -101,10 +114,11 @@ export function ProposalDiff({ diff }: Props) {
     <div className="space-y-2">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-muted hover:text-white transition-colors"
+        className="flex items-start gap-1.5 text-xs text-muted hover:text-white transition-colors text-left"
       >
-        <span className="font-semibold">{diffs.length} changes</span>
-        <span>{expanded ? "▲" : "▼"}</span>
+        <span className="font-semibold whitespace-nowrap">{diffs.length} changes</span>
+        <span className="text-muted">· {summarizeByEntity(diffs)}</span>
+        <span className="whitespace-nowrap">{expanded ? "▲" : "▼"}</span>
       </button>
       {expanded && (
         <div className="space-y-3 border-l border-border pl-3">
