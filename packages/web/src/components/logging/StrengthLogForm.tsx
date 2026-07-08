@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Field, SubmitButton } from "./shared.tsx";
+import { Field, SubmitButton, DateSelector, localDateStr, occurredAtFrom } from "./shared.tsx";
 import { useLogStrength } from "../../lib/hooks.ts";
 
 interface SetEntry {
@@ -82,6 +82,7 @@ const newSet = (): SetEntry => ({ exercise: "", reps: 10, weight_kg: null, rpe: 
 
 export function StrengthLogForm() {
   const logStrength = useLogStrength();
+  const [date, setDate] = useState(localDateStr());
   const [sets, setSets] = useState<SetEntry[]>([newSet()]);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
@@ -96,7 +97,7 @@ export function StrengthLogForm() {
     if (valid.length === 0) return;
     logStrength.mutate(
       {
-        occurred_at: new Date().toISOString(),
+        occurred_at: occurredAtFrom(date),
         notes: notes.trim() || null,
         sets: valid.map((s, i) => ({
           exercise_name: s.exercise.trim(),
@@ -119,6 +120,8 @@ export function StrengthLogForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <DateSelector value={date} onChange={setDate} />
+
       <div className="space-y-2">
         {sets.map((s, i) => (
           <SetRow key={i} set={s} onChange={(u) => update(i, u)} onRemove={() => setSets((ss) => ss.filter((_, j) => j !== i))} />

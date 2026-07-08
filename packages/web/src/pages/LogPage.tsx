@@ -3,14 +3,16 @@ import { RunLogForm } from "../components/logging/RunLogForm.tsx";
 import { ClimbLogForm } from "../components/logging/ClimbLogForm.tsx";
 import { StrengthLogForm } from "../components/logging/StrengthLogForm.tsx";
 import { CheckInForm } from "../components/logging/CheckInForm.tsx";
+import { ImportForm } from "../components/logging/ImportForm.tsx";
 
-type LogType = "run" | "climb" | "strength" | "checkin";
+type LogType = "run" | "climb" | "strength" | "checkin" | "import";
 
 const TABS: { type: LogType; label: string }[] = [
   { type: "run", label: "🏃 Run" },
   { type: "climb", label: "🧗 Climb" },
   { type: "strength", label: "💪 Strength" },
   { type: "checkin", label: "✅ Check-in" },
+  { type: "import", label: "⌚ Import" },
 ];
 
 export function LogPage() {
@@ -41,6 +43,7 @@ export function LogPage() {
         {type === "climb" && <ClimbLogForm />}
         {type === "strength" && <StrengthLogForm />}
         {type === "checkin" && <CheckInForm />}
+        {type === "import" && <ImportForm />}
       </div>
     </div>
   );

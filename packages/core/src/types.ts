@@ -99,11 +99,23 @@ export type Availability = z.infer<typeof AvailabilitySchema>;
 // ─── Goal target (design §3) ────────────────────────────────────────────────
 // Standardized goals.target JSONB shape the engine reads via readGoalTarget().
 
+export const GoalMetricSchema = z.enum([
+  "distance", "grade", "pace", "duration", "adherence",
+  // General-fitness metrics (roadmap phase 1):
+  "bodyweight",     // target bodyweight, unit kg/lb
+  "strength_load",  // e1RM or rep-max for a lift, unit kg/lb (lift in title/notes)
+  "frequency",      // sessions per week of a sport
+  "custom",         // anything else; value is free-form
+]);
+export type GoalMetric = z.infer<typeof GoalMetricSchema>;
+
 export const GoalTargetSchema = z.object({
-  metric: z.enum(["distance", "grade", "pace", "duration", "adherence"]),
+  metric: GoalMetricSchema,
   value: z.union([z.number(), z.string()]),
   unit: z.string().optional(),
   by_date: z.string().optional(),
+  /** Starting point (e.g. current bodyweight) so progress is computable. */
+  baseline: z.union([z.number(), z.string()]).optional(),
   gated_by: z.array(z.string()).optional(),
 });
 export type GoalTarget = z.infer<typeof GoalTargetSchema>;

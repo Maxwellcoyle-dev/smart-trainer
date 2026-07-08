@@ -90,7 +90,7 @@ export interface SkeletonSlotPayload {
 
 // ─── Logging mutations ────────────────────────────────────────────────────────
 
-const METRIC_KEYS = [["metrics"], ["plan"], ["home"]];
+const METRIC_KEYS = [["metrics"], ["plan"], ["home"], ["logs", "history"]];
 
 function useLoggingMutation<TPayload>(path: string) {
   const qc = useQueryClient();
@@ -106,6 +106,105 @@ export const useLogRun = () => useLoggingMutation<RunPayload>("/logs/run");
 export const useLogClimb = () => useLoggingMutation<ClimbPayload>("/logs/climb");
 export const useLogStrength = () => useLoggingMutation<StrengthPayload>("/logs/strength");
 export const useLogCheckIn = () => useLoggingMutation<CheckInPayload>("/logs/checkin");
+
+// ─── Session history (list / edit / delete) ───────────────────────────────────
+
+export interface HistoryClimb {
+  id: string;
+  grade_label: string | null;
+  grade_value: number | null;
+  grade_id: string | null;
+  style: ClimbPayload["climbs"][number]["style"];
+  environment: "indoor" | "outdoor";
+  attempts: number;
+  sends: number;
+  route_name: string | null;
+  crag: string | null;
+  order_in_session: number;
+  angle: "slab" | "vertical" | "overhang" | "roof" | null;
+  character_tags: ("powerful" | "endurance" | "technical" | "crimpy" | "dynamic")[];
+  length_ft: number | null;
+  effort: number | null;
+  result: "onsight" | "flash" | "redpoint" | "hung" | "dnf" | null;
+  climb_notes: string | null;
+  wall: string | null;
+}
+
+export interface HistorySet {
+  id: string;
+  exercise_id: string | null;
+  exercise_name: string | null;
+  set_index: number;
+  reps: number | null;
+  weight_kg: number | null;
+  rpe: number | null;
+}
+
+export interface HistorySession {
+  id: string;
+  sport: "run" | "climb" | "strength" | "mobility" | "cross_train";
+  occurred_at: string;
+  duration_s: number | null;
+  session_rpe: number | null;
+  location: string | null;
+  notes: string | null;
+  source: string;
+  run_details?: {
+    distance_m: number;
+    surface: RunPayload["surface"];
+    elevation_gain_m: number | null;
+  } | null;
+  climbs?: HistoryClimb[];
+  strength_sets?: HistorySet[];
+}
+
+export interface UpdateSessionPayload {
+  occurred_at?: string;
+  duration_s?: number | null;
+  session_rpe?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  run?: {
+    distance_m: number;
+    surface: RunPayload["surface"];
+    elevation_gain_m?: number | null;
+  };
+  climbs?: ClimbPayload["climbs"];
+  sets?: StrengthPayload["sets"];
+}
+
+const HISTORY_KEY = ["logs", "history"];
+
+export function useSessionHistory(days = 90, sport?: "run" | "climb" | "strength") {
+  return useQuery({
+    queryKey: [...HISTORY_KEY, days, sport ?? "all"],
+    queryFn: () =>
+      api.get<{ sessions: HistorySession[] }>(
+        `/logs/sessions?days=${days}${sport ? `&sport=${sport}` : ""}`
+      ),
+  });
+}
+
+export function useUpdateSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateSessionPayload & { id: string }) =>
+      api.patch(`/logs/sessions/${id}`, body),
+    onSuccess: () => {
+      [...METRIC_KEYS, HISTORY_KEY].forEach((key) => qc.invalidateQueries({ queryKey: key }));
+    },
+  });
+}
+
+export function useDeleteSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/logs/sessions/${id}`),
+    onSuccess: () => {
+      [...METRIC_KEYS, HISTORY_KEY].forEach((key) => qc.invalidateQueries({ queryKey: key }));
+    },
+  });
+}
 
 export interface ClimbPlaces {
   gyms: string[];
@@ -339,6 +438,61 @@ export function useFeasibility() {
   return useQuery({
     queryKey: ["plan", "feasibility"],
     queryFn: () => api.get<EventFeasibility>("/plan/feasibility"),
+  });
+}
+
+export interface GoalDraft {
+  kind: Goal["kind"];
+  title: string;
+  sport: string | null;
+  target_date: string | null;
+  priority: number;
+  target: {
+    metric: string;
+    value: number | string;
+    unit?: string;
+    baseline?: number | string;
+    by_date?: string;
+  } | null;
+  notes: string | null;
+}
+
+export interface ParseGoalsResult {
+  drafts: GoalDraft[];
+  unmapped: string[];
+}
+
+export interface ImportFileResult {
+  status: "imported" | "duplicate";
+  session_id: string | null;
+  duplicate_of?: "external_id" | "overlapping_session";
+  parsed: {
+    sport: string;
+    occurred_at: string;
+    duration_s: number | null;
+    distance_m: number | null;
+    elevation_gain_m: number | null;
+    avg_hr: number | null;
+    title: string | null;
+  };
+}
+
+export function useImportFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api.postForm<ImportFileResult>("/import/file", form);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["metrics"] }),
+  });
+}
+
+export function useParseGoals() {
+  return useMutation({
+    mutationFn: (body: { text: string }) =>
+      api.post<ParseGoalsResult>("/plan/goals/parse", body),
   });
 }
 

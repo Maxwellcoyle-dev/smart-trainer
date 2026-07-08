@@ -1,3 +1,63 @@
+// ─── Session date (supports backdating) ──────────────────────────────────────
+
+/** Local date as YYYY-MM-DD, offset by `daysAgo`. */
+export function localDateStr(daysAgo = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * ISO timestamp for a session on the given local date.
+ * Today → current time; past days → midday local time.
+ */
+export function occurredAtFrom(dateStr: string): string {
+  if (dateStr === localDateStr()) return new Date().toISOString();
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+}
+
+const QUICK_DAYS = [
+  { offset: 0, label: "Today" },
+  { offset: 1, label: "Yesterday" },
+  { offset: 2, label: "2 days ago" },
+];
+
+export function DateSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const isQuick = QUICK_DAYS.some((q) => localDateStr(q.offset) === value);
+  return (
+    <div>
+      <label className="block text-xs text-muted mb-1 uppercase tracking-wider">When</label>
+      <div className="flex gap-2">
+        {QUICK_DAYS.map((q) => {
+          const d = localDateStr(q.offset);
+          return (
+            <button
+              key={q.offset}
+              type="button"
+              onClick={() => onChange(d)}
+              className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+                value === d ? "bg-accent text-white" : "bg-surface2 text-muted"
+              }`}
+            >
+              {q.label}
+            </button>
+          );
+        })}
+        <input
+          type="date"
+          value={value}
+          max={localDateStr()}
+          onChange={(e) => e.target.value && onChange(e.target.value)}
+          className={`flex-1 min-w-0 bg-surface2 rounded-xl px-3 py-2 text-sm outline-none ${
+            isQuick ? "text-muted" : "text-text ring-1 ring-accent"
+          }`}
+        />
+      </div>
+    </div>
+  );
+}
+
 interface FieldProps {
   label: string;
   value: string;

@@ -21,6 +21,7 @@ import {
   LOWER_LIMB_PARTS,
 } from "@smart-trainer/core";
 import { generatePlanProposal, GenerateError } from "../generate.js";
+import { parseGoals, ParseGoalsError } from "../parse-goals.js";
 
 export const planRouter = new Hono();
 
@@ -161,6 +162,23 @@ const CreateGoalBody = z.object({
   target: z.record(z.string(), z.unknown()).optional(),
   priority: z.number().int().optional(),
   notes: z.string().nullable().optional(),
+});
+
+const ParseGoalsBody = z.object({
+  text: z.string().min(3).max(4000),
+});
+
+// NL goal intake: free text → structured goal drafts (nothing saved).
+planRouter.post("/goals/parse", zValidator("json", ParseGoalsBody), async (c) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    return c.json(await parseGoals(c.req.valid("json").text, today));
+  } catch (e) {
+    if (e instanceof ParseGoalsError) {
+      return c.json({ error: e.message }, e.status as 422 | 501 | 502);
+    }
+    throw e;
+  }
 });
 
 planRouter.post("/goals", zValidator("json", CreateGoalBody), async (c) => {

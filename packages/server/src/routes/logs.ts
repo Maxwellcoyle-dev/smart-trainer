@@ -7,6 +7,9 @@ import {
   logStrength,
   logCheckIn,
   getClimbPlaces,
+  getSessions,
+  updateSession,
+  deleteSession,
   runAdaptation,
   runDailyChecks,
   type RunAdaptationResult,
@@ -219,4 +222,57 @@ logsRouter.get("/climb/places", async (c) => {
   const userId = c.get("userId");
   const places = await getClimbPlaces(db, userId);
   return c.json(places);
+});
+
+// ─── Session history: list / edit / delete logged workouts ───────────────────
+
+const ClimbItem = ClimbBody.shape.climbs.element;
+const SetItem = StrengthBody.shape.sets.element;
+
+const UpdateSessionBody = z.object({
+  occurred_at: z.string().optional(),
+  duration_s: z.number().int().positive().optional().nullable(),
+  session_rpe: z.number().int().min(1).max(10).optional().nullable(),
+  location: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  run: z
+    .object({
+      distance_m: z.number().int().positive(),
+      surface: RunSurfaceSchema,
+      elevation_gain_m: z.number().int().optional().nullable(),
+    })
+    .optional(),
+  climbs: z.array(ClimbItem).optional(),
+  sets: z.array(SetItem).optional(),
+});
+
+const HistoryQuery = z.object({
+  days: z.coerce.number().int().min(1).max(730).default(90),
+  sport: z.enum(["run", "climb", "strength"]).optional(),
+});
+
+logsRouter.get("/sessions", zValidator("query", HistoryQuery), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const { days, sport } = c.req.valid("query");
+  const to = new Date().toISOString();
+  const from = new Date(Date.now() - days * 86_400_000).toISOString();
+  const result = await getSessions(db, userId, { from, to, sport });
+  // Newest first for history display
+  result.sessions.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+  return c.json(result);
+});
+
+logsRouter.patch("/sessions/:id", zValidator("json", UpdateSessionBody), async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const result = await updateSession(db, userId, c.req.param("id"), c.req.valid("json"));
+  return c.json(result);
+});
+
+logsRouter.delete("/sessions/:id", async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  await deleteSession(db, userId, c.req.param("id"));
+  return c.body(null, 204);
 });

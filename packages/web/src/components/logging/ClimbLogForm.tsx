@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RpeSlider, Field, SubmitButton } from "./shared.tsx";
+import { RpeSlider, Field, SubmitButton, DateSelector, localDateStr, occurredAtFrom } from "./shared.tsx";
 import type { ClimbStyle, ClimbEnvironment, ClimbAngle, ClimbCharacter, ClimbResult } from "@smart-trainer/core";
 import { useLogClimb, useClimbPlaces } from "../../lib/hooks.ts";
 import { gradesForDiscipline } from "../../lib/grades.ts";
@@ -359,6 +359,7 @@ const newClimb = (): ClimbEntry => ({
 export function ClimbLogForm() {
   const logClimb = useLogClimb();
   const { data: places } = useClimbPlaces();
+  const [date, setDate] = useState(localDateStr());
   const [environment, setEnvironment] = useState<ClimbEnvironment>("indoor");
   const [location, setLocation] = useState("");
   const [wall, setWall] = useState("");
@@ -381,7 +382,7 @@ export function ClimbLogForm() {
     const locTrim = location.trim() || null;
     logClimb.mutate(
       {
-        occurred_at: new Date().toISOString(),
+        occurred_at: occurredAtFrom(date),
         session_rpe: rpe,
         location: locTrim,
         notes: notes.trim() || null,
@@ -420,6 +421,8 @@ export function ClimbLogForm() {
 
   return (
     <form onSubmit={submit} className="space-y-3">
+      <DateSelector value={date} onChange={setDate} />
+
       {/* Session header */}
       <div className="bg-surface2 rounded-xl p-3 space-y-2">
         {/* Environment toggle */}

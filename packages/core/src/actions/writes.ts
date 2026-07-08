@@ -40,7 +40,7 @@ export const SORENESS_FLAG_THRESHOLD = 5;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Append one entry to the immutable adaptation ledger. Returns the new log id. */
-async function appendAdaptationLog(
+export async function appendAdaptationLog(
   db: SupabaseClient,
   userId: string,
   source: WriteSource,

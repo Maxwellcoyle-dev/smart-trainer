@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Field, NumField, SubmitButton } from "./shared.tsx";
+import { Field, NumField, SubmitButton, DateSelector, localDateStr } from "./shared.tsx";
 import type { BodyPart } from "@smart-trainer/core";
 import { useLogCheckIn } from "../../lib/hooks.ts";
 
@@ -46,6 +46,7 @@ function SorenessRow({
 const EMOJI_SCALE = ["", "😫", "😕", "😐", "🙂", "😄"];
 
 export function CheckInForm() {
+  const [date, setDate] = useState(localDateStr());
   const [sleep, setSleep] = useState("");
   const [sleepQuality, setSleepQuality] = useState(3);
   const [weight, setWeight] = useState("");
@@ -62,7 +63,7 @@ export function CheckInForm() {
     e.preventDefault();
     logCheckIn.mutate(
       {
-        check_in_date: new Date().toISOString().slice(0, 10),
+        check_in_date: date,
         sleep_hours: sleep ? parseFloat(sleep) : null,
         sleep_quality: sleepQuality,
         bodyweight_kg: weight ? parseFloat(weight) : null,
@@ -84,6 +85,8 @@ export function CheckInForm() {
 
   return (
     <form onSubmit={submit} className="space-y-5">
+      <DateSelector value={date} onChange={setDate} />
+
       <div className="grid grid-cols-2 gap-3">
         <NumField label="Sleep (hours)" value={sleep} onChange={setSleep} placeholder="7.5" min="0" max="24" step="0.5" />
         <NumField label="Weight (kg)" value={weight} onChange={setWeight} placeholder="70" step="0.1" />

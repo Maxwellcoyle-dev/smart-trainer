@@ -4,12 +4,14 @@ import { ApiError } from "../lib/api.ts";
 import {
   useCurrentPlan,
   useCreateGoal,
+  useParseGoals,
   useProfile,
   useSetAvailability,
   useGeneratePlan,
   useInjuryFlags,
   type Availability,
   type Goal,
+  type GoalDraft,
 } from "../lib/hooks.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -22,7 +24,10 @@ const GOAL_KINDS: Goal["kind"][] = ["event", "grade", "process", "metric"];
 const SPORTS = ["run", "climb", "strength", "mobility", "cross_train"] as const;
 const PER_SPORT = ["run", "climb", "strength"] as const;
 
-const METRICS = ["distance", "grade", "pace", "duration", "adherence"] as const;
+const METRICS = [
+  "distance", "grade", "pace", "duration", "adherence",
+  "bodyweight", "strength_load", "frequency", "custom",
+] as const;
 type Metric = (typeof METRICS)[number];
 
 const DEFAULT_AVAILABILITY: Availability = {
@@ -95,6 +100,109 @@ function Slider({
   );
 }
 
+// ─── Goal draft card (NL intake result, editable before save) ────────────────
+
+function DraftCard({
+  draft,
+  onChange,
+  onAdd,
+  onDiscard,
+  adding,
+}: {
+  draft: GoalDraft;
+  onChange: (d: GoalDraft) => void;
+  onAdd: () => void;
+  onDiscard: () => void;
+  adding: boolean;
+}) {
+  const inputCls = "bg-surface2 rounded-lg px-2.5 py-1.5 text-sm outline-none";
+  return (
+    <div className="bg-surface rounded-2xl p-3 space-y-2 border border-accent/30">
+      <input
+        type="text"
+        value={draft.title}
+        onChange={(e) => onChange({ ...draft, title: e.target.value })}
+        className={`w-full font-medium ${inputCls}`}
+      />
+      <div className="flex gap-2">
+        <select
+          value={draft.kind}
+          onChange={(e) => onChange({ ...draft, kind: e.target.value as Goal["kind"] })}
+          className={`flex-1 ${inputCls}`}
+        >
+          {GOAL_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <select
+          value={draft.sport ?? ""}
+          onChange={(e) => onChange({ ...draft, sport: e.target.value || null })}
+          className={`flex-1 ${inputCls}`}
+        >
+          <option value="">no sport</option>
+          {SPORTS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          type="number"
+          min="1"
+          max="5"
+          value={draft.priority}
+          onChange={(e) => onChange({ ...draft, priority: Number(e.target.value) || 1 })}
+          className={`w-14 ${inputCls}`}
+          title="Priority (1 = most important)"
+        />
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="date"
+          value={draft.target_date ?? ""}
+          onChange={(e) => onChange({ ...draft, target_date: e.target.value || null })}
+          className={`flex-1 ${inputCls}`}
+        />
+        {draft.target && (
+          <>
+            <select
+              value={draft.target.metric}
+              onChange={(e) => onChange({ ...draft, target: { ...draft.target!, metric: e.target.value } })}
+              className={`flex-1 ${inputCls}`}
+            >
+              {METRICS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <input
+              type="text"
+              value={String(draft.target.value)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const num = Number(raw);
+                onChange({
+                  ...draft,
+                  target: { ...draft.target!, value: raw.trim() && !Number.isNaN(num) ? num : raw },
+                });
+              }}
+              placeholder="value"
+              className={`w-20 ${inputCls}`}
+            />
+            {draft.target.unit !== undefined && (
+              <span className="text-muted text-xs self-center">{draft.target.unit}</span>
+            )}
+          </>
+        )}
+      </div>
+      {draft.notes && <p className="text-muted text-xs">{draft.notes}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={onAdd}
+          disabled={adding || !draft.title.trim()}
+          className="flex-1 py-2 rounded-lg bg-accent text-white text-sm font-semibold disabled:opacity-50 active:opacity-80"
+        >
+          {adding ? "Adding…" : "✓ Add goal"}
+        </button>
+        <button onClick={onDiscard} className="px-4 py-2 rounded-lg bg-surface2 text-muted text-sm">
+          Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function SetupPage() {
@@ -109,6 +217,49 @@ export function SetupPage() {
   const generate = useGeneratePlan();
 
   const goals = planData?.goals ?? [];
+
+  // ── NL goal intake ──
+  const parseGoals = useParseGoals();
+  const [nlText, setNlText] = useState("");
+  const [drafts, setDrafts] = useState<GoalDraft[]>([]);
+  const [unmapped, setUnmapped] = useState<string[]>([]);
+  const [addingIdx, setAddingIdx] = useState<number | null>(null);
+  const [showManual, setShowManual] = useState(false);
+
+  function doParse() {
+    const text = nlText.trim();
+    if (!text) return;
+    parseGoals.mutate(
+      { text },
+      {
+        onSuccess: (res) => {
+          setDrafts((d) => [...d, ...res.drafts]);
+          setUnmapped(res.unmapped);
+          setNlText("");
+        },
+      }
+    );
+  }
+
+  function addDraft(i: number) {
+    const d = drafts[i];
+    setAddingIdx(i);
+    createGoal.mutate(
+      {
+        kind: d.kind,
+        title: d.title.trim(),
+        sport: d.sport,
+        target_date: d.target_date,
+        priority: d.priority,
+        ...(d.target ? { target: d.target as Record<string, unknown> } : {}),
+        notes: d.notes,
+      },
+      {
+        onSuccess: () => setDrafts((ds) => ds.filter((_, j) => j !== i)),
+        onSettled: () => setAddingIdx(null),
+      }
+    );
+  }
 
   // ── Goal draft ──
   const [gTitle, setGTitle] = useState("");
@@ -246,6 +397,59 @@ export function SetupPage() {
             </div>
           )}
 
+          {/* NL intake */}
+          <div className="bg-surface rounded-2xl p-4 space-y-3">
+            <textarea
+              value={nlText}
+              onChange={(e) => setNlText(e.target.value)}
+              rows={3}
+              placeholder="Describe your goals in your own words — e.g. “Send V6 by October, lose 10 lb, and keep running 3×/week”"
+              className="w-full bg-surface2 rounded-xl px-4 py-3 text-sm outline-none resize-none placeholder:text-muted"
+            />
+            {parseGoals.isError && (
+              <p className="text-danger text-sm">{(parseGoals.error as Error).message}</p>
+            )}
+            <button
+              onClick={doParse}
+              disabled={parseGoals.isPending || !nlText.trim()}
+              className="w-full py-3 rounded-xl bg-accent text-white text-sm font-semibold disabled:opacity-50 active:opacity-80"
+            >
+              {parseGoals.isPending ? "Thinking…" : "✨ Turn into goals"}
+            </button>
+          </div>
+
+          {unmapped.length > 0 && (
+            <p className="text-warning text-xs bg-surface2 rounded-xl px-3 py-2">
+              Couldn't map: {unmapped.join("; ")}
+            </p>
+          )}
+
+          {drafts.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted uppercase tracking-wider">
+                Review &amp; confirm — nothing is saved until you add it
+              </p>
+              {drafts.map((d, i) => (
+                <DraftCard
+                  key={i}
+                  draft={d}
+                  onChange={(u) => setDrafts((ds) => ds.map((x, j) => (j === i ? u : x)))}
+                  onAdd={() => addDraft(i)}
+                  onDiscard={() => setDrafts((ds) => ds.filter((_, j) => j !== i))}
+                  adding={addingIdx === i && createGoal.isPending}
+                />
+              ))}
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowManual((s) => !s)}
+            className="text-muted text-xs underline"
+          >
+            {showManual ? "Hide manual entry" : "Or add a goal manually"}
+          </button>
+
+          {showManual && (
           <div className="bg-surface rounded-2xl p-4 space-y-3">
             <input
               type="text"
@@ -338,6 +542,7 @@ export function SetupPage() {
               {createGoal.isPending ? "Adding…" : "+ Add goal"}
             </button>
           </div>
+          )}
         </div>
       )}
 

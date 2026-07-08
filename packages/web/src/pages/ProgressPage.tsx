@@ -15,6 +15,7 @@ import {
   useClimbByAngle,
   useClimbByCharacter,
 } from "../lib/hooks.ts";
+import { SessionHistory } from "../components/history/SessionHistory.tsx";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -366,17 +367,40 @@ function AngleCharacterCard() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ProgressPage() {
+  const [tab, setTab] = useState<"trends" | "history">("trends");
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-2xl font-bold pt-2">Progress</h1>
-      <MileageCard />
-      <PyramidCard />
-      <GradeProgressionCard />
-      <SendRateCard />
-      <VolumeCard />
-      <AngleCharacterCard />
-      <AdherenceCard />
-      <SorenessCard />
+
+      <div className="flex gap-1 bg-surface rounded-xl p-1">
+        {(["trends", "history"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+              tab === t ? "bg-accent text-white" : "text-muted"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "trends" ? (
+        <>
+          <MileageCard />
+          <PyramidCard />
+          <GradeProgressionCard />
+          <SendRateCard />
+          <VolumeCard />
+          <AngleCharacterCard />
+          <AdherenceCard />
+          <SorenessCard />
+        </>
+      ) : (
+        <SessionHistory />
+      )}
     </div>
   );
 }

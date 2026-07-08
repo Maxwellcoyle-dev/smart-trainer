@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Field, NumField, RpeSlider, SubmitButton } from "./shared.tsx";
+import { Field, NumField, RpeSlider, SubmitButton, DateSelector, localDateStr, occurredAtFrom } from "./shared.tsx";
 import { useLogRun } from "../../lib/hooks.ts";
 
 export function RunLogForm() {
   const logRun = useLogRun();
+  const [date, setDate] = useState(localDateStr());
   const [distanceKm, setDistanceKm] = useState("");
   const [hours, setHours] = useState("");
   const [minutes, setMinutes] = useState("");
@@ -41,7 +42,7 @@ export function RunLogForm() {
     if (!(distM > 0) || !(durS > 0)) return;
     logRun.mutate(
       {
-        occurred_at: new Date().toISOString(),
+        occurred_at: occurredAtFrom(date),
         distance_m: Math.round(distM),
         duration_s: durS,
         surface,
@@ -61,6 +62,8 @@ export function RunLogForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <DateSelector value={date} onChange={setDate} />
+
       <div className="grid grid-cols-2 gap-3">
         <NumField
           label="Distance (km)"
