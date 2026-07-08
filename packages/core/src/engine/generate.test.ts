@@ -206,3 +206,44 @@ describe("validateGeneratedPlan", () => {
     expect(res.violations.join(" ")).toMatch(/cap/);
   });
 });
+
+// ─── P30 regression: every plan horizon must pass its own validation ─────────
+
+describe("generateMacroPlan validates against its own guardrails at every horizon", () => {
+  // Live bug (2026-07-08): a 21-week horizon put the taper where a deload slot
+  // fell, and the validator counted taper weeks as build weeks → false
+  // "5 consecutive build weeks without a deload". Sweep 6–40 weeks so no other
+  // length-dependent violation can hide.
+  function addWeeks(iso: string, weeks: number): string {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + weeks * 7);
+    return d.toISOString().slice(0, 10);
+  }
+
+  it("no violations for any horizon from 6 to 40 weeks (healthy athlete)", () => {
+    for (let w = 6; w <= 40; w++) {
+      const input = baseInput({
+        goals: [
+          goal({ id: "half", title: "Trail half", target_date: addWeeks(NOW, w), priority: 1 }),
+        ],
+      });
+      const macro = generateMacroPlan(input);
+      const verdict = validateGeneratedPlan(macro, input);
+      expect(verdict.violations, `horizon ${w}w`).toEqual([]);
+    }
+  });
+
+  it("no violations across horizons with an active lower-limb flag (gate closed)", () => {
+    for (let w = 8; w <= 30; w++) {
+      const input = baseInput({
+        goals: [
+          goal({ id: "half", title: "Trail half", target_date: addWeeks(NOW, w), priority: 1 }),
+        ],
+        activeFlags: [flag({ body_part: "calf" })],
+      });
+      const macro = generateMacroPlan(input);
+      const verdict = validateGeneratedPlan(macro, input);
+      expect(verdict.violations, `horizon ${w}w (flagged)`).toEqual([]);
+    }
+  });
+});

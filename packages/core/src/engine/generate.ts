@@ -211,16 +211,21 @@ export function validateGeneratedPlan(
   }
 
   // 2. Deload cadence: never more than DELOAD_EVERY_WEEKS progression weeks
-  //    without one (only meaningful past that horizon).
+  //    without one (only meaningful past that horizon). Taper weeks reset the
+  //    counter — they are volume reductions by definition, not build weeks.
+  //    (Without this, a deload slot colliding with the taper at certain plan
+  //    lengths — e.g. 21 weeks — false-flagged the generator's own output.)
   if (weeks.length > DELOAD_EVERY_WEEKS) {
     let sinceDeload = 0;
-    for (const w of weeks) {
-      sinceDeload = w.targets.deload ? 0 : sinceDeload + 1;
-      if (sinceDeload > DELOAD_EVERY_WEEKS) {
-        violations.push(
-          `${sinceDeload} consecutive build weeks without a deload (max ${DELOAD_EVERY_WEEKS}).`
-        );
-        break;
+    outer: for (const p of macro.phases) {
+      for (const w of p.weeks) {
+        sinceDeload = w.targets.deload || p.type === "taper" ? 0 : sinceDeload + 1;
+        if (sinceDeload > DELOAD_EVERY_WEEKS) {
+          violations.push(
+            `${sinceDeload} consecutive build weeks without a deload (max ${DELOAD_EVERY_WEEKS}).`
+          );
+          break outer;
+        }
       }
     }
   }
