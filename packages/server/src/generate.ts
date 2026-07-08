@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   getProfile,
   getGoals,
+  getCurrentPlan,
   getInjuryFlags,
   getWeeklyMileage,
   generateMacroPlan,
@@ -46,11 +47,12 @@ export async function generatePlanProposal(
 ): Promise<Proposal> {
   const today = new Date().toISOString().slice(0, 10);
 
-  const [profile, goals, flags, mileage] = await Promise.all([
+  const [profile, goals, flags, mileage, currentPlan] = await Promise.all([
     getProfile(db, userId).catch(() => null),
     getGoals(db, userId),
     getInjuryFlags(db, userId),
     getWeeklyMileage(db, userId, 6),
+    getCurrentPlan(db, userId).catch(() => null),
   ]);
 
   const availability = profile?.availability;
@@ -94,6 +96,12 @@ export async function generatePlanProposal(
   // availability later won't rewrite this plan.
   diffs = snapshotAvailability(diffs, availability, opts.name);
 
+  // Approving a generated plan should *switch* plans atomically: the previous
+  // active plan is completed and the new one lands active, in the same diff
+  // array. One approve does the whole transition; one undo restores the old
+  // plan and removes the new one (invertDiff reverses array order).
+  diffs = withPlanTransition(diffs, currentPlan?.status === "active" ? currentPlan.id : null);
+
   // Stage 2 — LLM personalization (best-effort; deterministic plan if it fails).
   const personalization = await personalize(macro, input).catch(() => null);
   if (personalization) {
@@ -111,6 +119,32 @@ export async function generatePlanProposal(
 function numPref(prefs: unknown, key: string): number | undefined {
   const v = (prefs as Record<string, unknown> | null | undefined)?.[key];
   return typeof v === "number" ? v : undefined;
+}
+
+/**
+ * Make the whole-plan proposal an atomic plan *switch*:
+ * 1. the new plan is created `active` (the engine emits it `draft` — approval
+ *    of the proposal IS the athlete's adoption of the plan), and
+ * 2. if another plan is currently active, an update diff completing it is
+ *    prepended, so apply order is: complete old → create new.
+ */
+function withPlanTransition(diffs: AdaptationDiff[], currentPlanId: string | null): AdaptationDiff[] {
+  const out: AdaptationDiff[] = diffs.map((d) =>
+    d.entity_type === "plans" && d.op === "create"
+      ? { ...d, after: { ...(d.after as Record<string, unknown>), status: "active" } }
+      : d
+  );
+  if (currentPlanId) {
+    out.unshift({
+      entity_type: "plans",
+      entity_id: currentPlanId,
+      op: "update",
+      before: { status: "active" },
+      after: { status: "completed" },
+      fields: ["status"],
+    });
+  }
+  return out;
 }
 
 /** Set plans.availability + (optional) name on the create-plan diff. */
