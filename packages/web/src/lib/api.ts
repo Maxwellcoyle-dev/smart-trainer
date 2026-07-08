@@ -1,6 +1,12 @@
 import { supabase } from "./supabase.ts";
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+// Normalize: trim trailing slash and force a scheme. A scheme-less value
+// (e.g. "smart-trainer-production.up.railway.app") would otherwise be treated
+// as a *relative path* by fetch — requests then hit the SPA's own origin, the
+// rewrite serves index.html with a 200, and every read silently parses to
+// nothing. (This exact misconfig took the app down in v1 testing.)
+const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim().replace(/\/$/, "") ?? "";
+const API_URL = rawApiUrl && !/^https?:\/\//i.test(rawApiUrl) ? `https://${rawApiUrl}` : rawApiUrl;
 
 // Guard: if VITE_API_URL is missing at build time, API_URL is "" and every
 // request falls back to the SPA's own origin. Reads then return index.html
