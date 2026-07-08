@@ -341,3 +341,74 @@ describe("diff builders are undo-ready (carry before)", () => {
     expect((d.after as { sport: SportType }).sport).toBe("strength");
   });
 });
+
+// ─── phase.ending → slip / generate (G5) ─────────────────────────────────────
+
+describe("classifyAdaptation — phase.ending (G5)", () => {
+  const GOAL = {
+    id: "10000000-0000-0000-0000-000000000001",
+    title: "Trail half marathon",
+    target_date: "2026-10-31",
+  };
+
+  it("gate closed + next phase needs distance → major slip_event with a +SLIP_WEEKS goals diff", () => {
+    const c = ctx({
+      runCapped: true,
+      activeFlags: [flag({ body_part: "calf" })],
+      phase: { index: 0, type: "base", nextType: "build" },
+      primaryGoal: GOAL,
+    });
+    const d = classifyAdaptation({ type: "phase.ending", phase_index: 0 }, c);
+
+    expect(d.tier).toBe("major");
+    expect(d.action_type).toBe("slip_event");
+    expect(d.diffs).toHaveLength(1);
+    const diff = d.diffs[0];
+    expect(diff.entity_type).toBe("goals");
+    expect(diff.entity_id).toBe(GOAL.id);
+    expect(diff.op).toBe("update");
+    expect(diff.before).toEqual({ target_date: "2026-10-31" });
+    expect(diff.after).toEqual({ target_date: "2026-11-28" }); // +4 weeks
+    expect(diff.fields).toEqual(["target_date"]);
+  });
+
+  it("gate open → generate_phase (no slip)", () => {
+    const c = ctx({
+      runCapped: false,
+      phase: { index: 0, type: "base", nextType: "build" },
+      primaryGoal: GOAL,
+    });
+    const d = classifyAdaptation({ type: "phase.ending", phase_index: 0 }, c);
+    expect(d.action_type).toBe("generate_phase");
+    expect(d.diffs).toHaveLength(0);
+  });
+
+  it("gate closed but next phase is not a distance build → generate_phase", () => {
+    const c = ctx({
+      runCapped: true,
+      phase: { index: 2, type: "peak", nextType: "taper" },
+      primaryGoal: GOAL,
+    });
+    const d = classifyAdaptation({ type: "phase.ending", phase_index: 2 }, c);
+    expect(d.action_type).toBe("generate_phase");
+  });
+
+  it("gate closed + distance build but no dated goal → generate_phase", () => {
+    const c = ctx({
+      runCapped: true,
+      phase: { index: 0, type: "base", nextType: "build" },
+    });
+    const d = classifyAdaptation({ type: "phase.ending", phase_index: 0 }, c);
+    expect(d.action_type).toBe("generate_phase");
+  });
+
+  it("slip_event is never auto-applied (goals are outside the minor envelope)", () => {
+    const c = ctx({
+      runCapped: true,
+      phase: { index: 0, type: "base", nextType: "build" },
+      primaryGoal: GOAL,
+    });
+    const d = classifyAdaptation({ type: "phase.ending", phase_index: 0 }, c);
+    expect(d.tier).not.toBe("minor");
+  });
+});

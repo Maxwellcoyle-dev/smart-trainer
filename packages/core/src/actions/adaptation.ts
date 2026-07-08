@@ -20,7 +20,7 @@
 import { SupabaseClient } from "../db.js";
 import { applyDiff } from "./apply.js";
 import { createProposal } from "./writes.js";
-import { getCurrentPlan, getInjuryFlags, getProfile } from "./reads.js";
+import { getCurrentPlan, getGoals, getInjuryFlags, getProfile } from "./reads.js";
 import { LOWER_LIMB_PARTS } from "../engine/periodization.js";
 import {
   classifyAdaptation,
@@ -30,6 +30,7 @@ import {
 } from "../engine/adaptation.js";
 import type {
   AdaptationDiff,
+  Goal,
   InjuryFlag,
   Phase,
   Plan,
@@ -87,7 +88,8 @@ export function selectWeekContext(
   plan: LoadedPlan,
   flags: InjuryFlag[],
   event: AdaptationEvent,
-  today: string
+  today: string,
+  goals: Goal[] = []
 ): AdaptationContext | null {
   const weeks = flattenWeeks(plan);
   if (weeks.length === 0) return null;
@@ -115,6 +117,29 @@ export function selectWeekContext(
     (f) => f.status !== "resolved" && LOWER_LIMB_PARTS.includes(f.body_part)
   );
 
+  // G5: phase + primary-dated-goal context for phase.ending decisions.
+  let phaseCtx: AdaptationContext["phase"];
+  let primaryGoal: AdaptationContext["primaryGoal"];
+  if (event.type === "phase.ending") {
+    const phases = [...(plan.phases ?? [])].sort((a, b) => a.phase_index - b.phase_index);
+    const ending = phases.find((p) => p.phase_index === event.phase_index);
+    const next = phases.find((p) => p.phase_index === event.phase_index + 1);
+    phaseCtx = {
+      index: event.phase_index,
+      type: ending?.type ?? null,
+      nextType: next?.type ?? null,
+    };
+    const dated = goals
+      .filter((g) => g.status === "active" && g.target_date != null)
+      .sort(
+        (a, b) =>
+          a.target_date!.localeCompare(b.target_date!) || a.priority - b.priority
+      )[0];
+    if (dated) {
+      primaryGoal = { id: dated.id, title: dated.title, target_date: dated.target_date };
+    }
+  }
+
   return {
     today,
     week: {
@@ -126,6 +151,8 @@ export function selectWeekContext(
     weekSessions: (week.prescribed_sessions ?? []).filter((s) => s.deleted_at == null),
     activeFlags: flags,
     runCapped,
+    phase: phaseCtx,
+    primaryGoal,
   };
 }
 
@@ -218,7 +245,13 @@ export async function runAdaptation(
   opts: { context?: AdaptationContext; autonomy?: Autonomy } = {}
 ): Promise<RunAdaptationResult> {
   const today = new Date().toISOString().slice(0, 10);
-  const jobId = await startJob(db, userId, "adaptation", event.type);
+  // phase.ending runs are one-shot per phase — key the audit row so
+  // checkPhaseEnding can dedupe against it.
+  const trigger =
+    event.type === "phase.ending"
+      ? `phase.ending:${event.phase_id ?? event.phase_index}`
+      : event.type;
+  const jobId = await startJob(db, userId, "adaptation", trigger);
 
   try {
     // Build context (unless the caller supplied one, e.g. tests).
@@ -226,10 +259,11 @@ export async function runAdaptation(
     let autonomy = opts.autonomy;
 
     if (!ctx || autonomy == null) {
-      const [plan, flags, profile] = await Promise.all([
+      const [plan, flags, profile, goals] = await Promise.all([
         getCurrentPlan(db, userId) as Promise<LoadedPlan | null>,
         getInjuryFlags(db, userId),
         getProfile(db, userId),
+        event.type === "phase.ending" ? getGoals(db, userId) : Promise.resolve([] as Goal[]),
       ]);
       autonomy = autonomy ?? resolveAutonomy(profile?.preferences);
       if (!ctx) {
@@ -242,7 +276,7 @@ export async function runAdaptation(
             job_run_id: jobId,
           };
         }
-        ctx = selectWeekContext(plan, flags, event, today);
+        ctx = selectWeekContext(plan, flags, event, today, goals);
         if (!ctx) {
           await finishJob(db, jobId, "skipped", "No current plan week for this event.");
           return {
@@ -327,4 +361,46 @@ export async function runAdaptation(
     await finishJob(db, jobId, "failed", err instanceof Error ? err.message : String(err));
     throw err;
   }
+}
+
+// ─── checkPhaseEnding (G5) ────────────────────────────────────────────────────
+
+/**
+ * Detect a phase rollover and fire the `phase.ending` event exactly once per
+ * phase. There is no scheduler in v1, so this piggybacks on the daily hooks
+ * (call it after a check-in lands): if today falls inside the FINAL week of a
+ * phase and no phase.ending job has run for that phase yet, run the adaptation.
+ *
+ * Dedupe rides the existing audit trail: runAdaptation records ai_job_runs with
+ * trigger_event `phase.ending:<phase_id>`, so a prior row (any status) means
+ * this phase was already handled. Error-isolated by callers like other hooks.
+ */
+export async function checkPhaseEnding(
+  db: SupabaseClient,
+  userId: string
+): Promise<RunAdaptationResult | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const plan = (await getCurrentPlan(db, userId)) as LoadedPlan | null;
+  if (!plan) return null;
+
+  for (const phase of plan.phases ?? []) {
+    const weeks = [...(phase.plan_weeks ?? [])].sort((a, b) => a.week_index - b.week_index);
+    const last = weeks[weeks.length - 1];
+    if (!last || !weekContains(last, today)) continue;
+
+    const { data } = await db
+      .from("ai_job_runs")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("trigger_event", `phase.ending:${phase.id}`)
+      .limit(1);
+    if (data && data.length > 0) return null; // already handled
+
+    return runAdaptation(db, userId, {
+      type: "phase.ending",
+      phase_index: phase.phase_index,
+      phase_id: phase.id,
+    });
+  }
+  return null;
 }

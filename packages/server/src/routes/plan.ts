@@ -15,6 +15,10 @@ import {
   SportTypeSchema,
   GoalKindSchema,
   GoalStatusSchema,
+  getInjuryFlags,
+  getWeeklyMileage,
+  assessEventFeasibility,
+  LOWER_LIMB_PARTS,
 } from "@smart-trainer/core";
 import { generatePlanProposal, GenerateError } from "../generate.js";
 
@@ -60,6 +64,37 @@ planRouter.get("/current", async (c) => {
     getGoals(db, userId),
   ]);
   return c.json({ plan, goals });
+});
+
+// G5 (design §6.3): surface whether the primary dated run goal is still
+// feasible under the ≤10%/wk ramp, given today's volume and the gate state.
+planRouter.get("/feasibility", async (c) => {
+  const db = c.get("supabase");
+  const userId = c.get("userId");
+  const today = new Date().toISOString().slice(0, 10);
+  const [goals, flags, mileage] = await Promise.all([
+    getGoals(db, userId),
+    getInjuryFlags(db, userId),
+    getWeeklyMileage(db, userId, 4),
+  ]);
+  const goal =
+    goals
+      .filter(
+        (g) =>
+          g.status === "active" &&
+          g.target_date != null &&
+          (g.sport === "run" || g.sport == null)
+      )
+      .sort(
+        (a, b) => a.target_date!.localeCompare(b.target_date!) || a.priority - b.priority
+      )[0] ?? null;
+  const gateClosed = flags.some(
+    (f) => f.status !== "resolved" && LOWER_LIMB_PARTS.includes(f.body_part)
+  );
+  const weeklyDistanceM = mileage.length
+    ? (mileage[mileage.length - 1].distance_m ?? 0)
+    : 0;
+  return c.json(assessEventFeasibility({ today, goal, gateClosed, weeklyDistanceM }));
 });
 
 planRouter.get("/skeleton", async (c) => {

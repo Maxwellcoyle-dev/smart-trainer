@@ -8,6 +8,7 @@ import {
   logCheckIn,
   getClimbPlaces,
   runAdaptation,
+  checkPhaseEnding,
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
@@ -178,7 +179,26 @@ logsRouter.post("/checkin", zValidator("json", CheckInBody), async (c) => {
     raised.length > 0
       ? await fireAdaptation(db, userId, { type: "checkin.submitted", raised_flags: raised })
       : null;
-  return c.json({ ...result, adaptation }, 201);
+  // G5: the daily check-in doubles as the phase-rollover tick (no scheduler in
+  // v1). checkPhaseEnding fires at most once per phase; error-isolated like
+  // every hook — a failure never fails the check-in.
+  let phase_ending: AdaptationSummary | null = null;
+  try {
+    const r = await checkPhaseEnding(db, userId);
+    if (r) {
+      phase_ending = {
+        outcome: r.outcome,
+        action_type: r.decision.action_type,
+        tier: r.decision.tier,
+        notify: r.notify ?? r.decision.rationale,
+        log_id: r.log_id,
+        proposal_id: r.proposal?.id,
+      };
+    }
+  } catch {
+    phase_ending = null;
+  }
+  return c.json({ ...result, adaptation, phase_ending }, 201);
 });
 
 logsRouter.get("/climb/places", async (c) => {

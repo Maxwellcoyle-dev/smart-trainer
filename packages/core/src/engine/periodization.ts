@@ -805,3 +805,96 @@ export function generatePlanDiffs(macro: MacroPlan): AdaptationDiff[] {
 
   return diffs;
 }
+
+// ─── Event feasibility (G5, design §6.3 surfacing) ────────────────────────────
+
+/** Weekly run volume considered "half-marathon ready" going into the taper. */
+export const HALF_READY_WEEKLY_M = 32_000;
+
+export type FeasibilityStatus = "on_track" | "at_risk" | "infeasible" | "no_dated_goal";
+
+export interface EventFeasibility {
+  status: FeasibilityStatus;
+  goal_id: string | null;
+  goal_title: string | null;
+  target_date: string | null;
+  weeks_available: number | null;
+  weeks_needed: number | null;
+  gate_closed: boolean;
+  note: string;
+}
+
+/**
+ * Pure feasibility check for the primary dated run goal (design §6.3): from the
+ * current weekly run volume, ramping ≤ RAMP_MAX_PCT per week, how many weeks
+ * until HALF_READY_WEEKLY_M — and do the weeks before the taper allow it?
+ * While the gate is closed the ramp can't start, so the projection begins from
+ * the gate cap and the note says the clock is effectively paused.
+ *
+ * Status: on_track (fits) · at_risk (short by ≤ SLIP_WEEKS-equivalent, 4) ·
+ * infeasible (short by more). Deliberately conservative and explainable —
+ * no LLM, no DB.
+ */
+export function assessEventFeasibility(args: {
+  today: string;
+  goal: Pick<Goal, "id" | "title" | "target_date"> | null;
+  gateClosed: boolean;
+  weeklyDistanceM: number;
+}): EventFeasibility {
+  const { today, goal, gateClosed, weeklyDistanceM } = args;
+  if (!goal?.target_date) {
+    return {
+      status: "no_dated_goal",
+      goal_id: goal?.id ?? null,
+      goal_title: goal?.title ?? null,
+      target_date: null,
+      weeks_available: null,
+      weeks_needed: null,
+      gate_closed: gateClosed,
+      note: "No dated run goal to assess.",
+    };
+  }
+
+  const msPerWeek = 7 * 86_400_000;
+  const totalWeeks = Math.floor(
+    (Date.parse(goal.target_date) - Date.parse(today)) / msPerWeek
+  );
+  const weeksAvailable = Math.max(0, totalWeeks - TAPER_FACTORS.length);
+
+  // Ramp projection: start from today's volume (or the gate cap when closed /
+  // volume is effectively zero) and compound RAMP_MAX_PCT weekly.
+  let volume = Math.max(gateClosed ? BASE_GATE_RUN_CAP_M : weeklyDistanceM, BASE_GATE_RUN_CAP_M);
+  let weeksNeeded = 0;
+  while (volume < HALF_READY_WEEKLY_M && weeksNeeded < 200) {
+    volume *= 1 + RAMP_MAX_PCT;
+    weeksNeeded++;
+  }
+
+  const shortfall = weeksNeeded - weeksAvailable;
+  const status: FeasibilityStatus =
+    shortfall <= 0 ? "on_track" : shortfall <= 4 ? "at_risk" : "infeasible";
+
+  const gateNote = gateClosed
+    ? " The base gate is currently CLOSED (lower-limb flag active), so the ramp hasn't started — every closed week consumes the margin."
+    : "";
+  const note =
+    status === "on_track"
+      ? `On track: ~${weeksNeeded}w of ≤${Math.round(RAMP_MAX_PCT * 100)}%/wk ramp needed to reach ${Math.round(HALF_READY_WEEKLY_M / 1000)}k/wk; ${weeksAvailable}w available before the taper.${gateNote}`
+      : status === "at_risk"
+        ? `At risk: needs ~${weeksNeeded}w of ramp but only ${weeksAvailable}w remain before the taper (short ${shortfall}w). A ${SLIP_WEEKS_EQUIV}w slide would restore margin.${gateNote}`
+        : `Not feasible on the current date: needs ~${weeksNeeded}w of ramp with only ${weeksAvailable}w available (short ${shortfall}w). Slide the event or reset expectations to finish-only.${gateNote}`;
+
+  return {
+    status,
+    goal_id: goal.id,
+    goal_title: goal.title,
+    target_date: goal.target_date,
+    weeks_available: weeksAvailable,
+    weeks_needed: weeksNeeded,
+    gate_closed: gateClosed,
+    note,
+  };
+}
+
+/** Mirror of adaptation.SLIP_WEEKS (kept as a literal to avoid an import cycle). */
+const SLIP_WEEKS_EQUIV = 4;

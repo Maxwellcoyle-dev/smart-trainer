@@ -42,6 +42,16 @@ export const SCALE_PCT = 0.15;
 /** A minor change may touch at most this many sessions (design §5.2 guardrail). */
 export const MINOR_MAX_SESSIONS = 2;
 
+/**
+ * G5 (design §6.3): when a phase ends with the base gate still closed and the
+ * next phase needs a distance build, the dated event *slides* by this many
+ * weeks rather than forcing volume onto an unready body.
+ */
+export const SLIP_WEEKS = 4;
+
+/** Phase types whose weekly targets assume an open distance-build gate. */
+export const DISTANCE_BUILD_PHASES = new Set(["build", "peak"]);
+
 // ─── Event + context types ────────────────────────────────────────────────────
 
 export type AdaptationTier = "minor" | "major" | "none";
@@ -66,7 +76,7 @@ export type AdaptationEvent =
     }
   | { type: "session.missed"; prescribed_session_id: string }
   | { type: "week.completed"; week_index: number }
-  | { type: "phase.ending"; phase_index: number };
+  | { type: "phase.ending"; phase_index: number; phase_id?: string };
 
 /** The current plan week — only its id, index, start and targets are needed. */
 export interface AdaptationWeek {
@@ -89,6 +99,13 @@ export interface AdaptationContext {
    * cap literally inviolable even under auto-adaptation.
    */
   runCapped: boolean;
+  /**
+   * G5: phase context for `phase.ending` decisions. `nextType` is the type of
+   * the phase after the one ending (null when the plan is finishing).
+   */
+  phase?: { index: number; type: string | null; nextType: string | null };
+  /** G5: the primary dated goal the plan builds toward, if any. */
+  primaryGoal?: { id: string; title: string; target_date: string | null };
 }
 
 export interface AdaptationDecision {
@@ -438,6 +455,57 @@ function classifyMissed(
   );
 }
 
+// ─── phase.ending (G5, design §6.3) ───────────────────────────────────────────
+
+/**
+ * A phase is rolling over. Two outcomes, both MAJOR (phase structure is never
+ * auto-applied):
+ *
+ *   • Gate still closed + the next phase assumes a distance build → the plan's
+ *     stated assumption fires: propose sliding the primary dated goal by
+ *     SLIP_WEEKS ("the event slides rather than forcing volume"). The diff is a
+ *     single goals update — applyable, and one undo restores the original date.
+ *     Approving the slip is the athlete's cue to regenerate the plan around the
+ *     new date.
+ *   • Otherwise → propose generating the next phase block (existing behaviour).
+ */
+export function classifyPhaseEnding(
+  event: Extract<AdaptationEvent, { type: "phase.ending" }>,
+  ctx: AdaptationContext
+): AdaptationDecision {
+  const goal = ctx.primaryGoal;
+  const nextNeedsDistance =
+    ctx.phase?.nextType != null && DISTANCE_BUILD_PHASES.has(ctx.phase.nextType);
+
+  if (ctx.runCapped && nextNeedsDistance && goal?.target_date) {
+    const slipped = addDays(goal.target_date, SLIP_WEEKS * 7);
+    return major(
+      "slip_event",
+      [
+        {
+          entity_type: "goals",
+          entity_id: goal.id,
+          op: "update",
+          before: { target_date: goal.target_date },
+          after: { target_date: slipped },
+          fields: ["target_date"],
+        },
+      ],
+      `Phase ${event.phase_index} is ending but the base gate is still closed ` +
+        `(lower-limb flag active), and the next phase assumes a distance build. ` +
+        `Rather than forcing volume, this proposes sliding "${goal.title}" from ` +
+        `${goal.target_date} to ${slipped} (+${SLIP_WEEKS} weeks). If you approve, ` +
+        `regenerate the plan to rebuild the phases around the new date.`
+    );
+  }
+
+  return major(
+    "generate_phase",
+    [],
+    `Phase ${event.phase_index} ending — proposing the next phase block for approval.`
+  );
+}
+
 // ─── Top-level classifier ─────────────────────────────────────────────────────
 
 /**
@@ -469,11 +537,7 @@ export function classifyAdaptation(
       );
       break;
     case "phase.ending":
-      decision = major(
-        "generate_phase",
-        [],
-        `Phase ${event.phase_index} ending — proposing the next phase block for approval.`
-      );
+      decision = classifyPhaseEnding(event, ctx);
       break;
     default:
       decision = none("Unrecognized event.");

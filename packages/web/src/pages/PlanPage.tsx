@@ -14,6 +14,7 @@ import {
   useCreateGoal,
   useUpdateGoal,
   useDeleteGoal,
+  useFeasibility,
 } from "../lib/hooks.ts";
 
 /** Next Monday in YYYY-MM-DD (sensible default plan start). */
@@ -50,6 +51,7 @@ export function PlanPage() {
   const { data: proposals } = usePendingProposals();
   const resolveProposal = useResolveProposal();
   const { data: planData } = useCurrentPlan();
+  const { data: feasibility } = useFeasibility();
   const createPlan = useCreatePlan();
   const fillWeek = useFillWeek();
   const createGoal = useCreateGoal();
@@ -148,6 +150,25 @@ export function PlanPage() {
           Set goals + availability and let the engine periodize it for you
         </p>
       </button>
+
+      {/* G5: event-feasibility banner — only when the dated goal is in doubt */}
+      {feasibility && (feasibility.status === "at_risk" || feasibility.status === "infeasible") && (
+        <div
+          className={`rounded-2xl p-4 border ${
+            feasibility.status === "infeasible"
+              ? "bg-danger/10 border-danger/40"
+              : "bg-orange-500/10 border-orange-500/40"
+          }`}
+        >
+          <p className="text-xs uppercase tracking-wider mb-1 text-muted">
+            {feasibility.status === "infeasible" ? "⛔ Event date not feasible" : "⚠️ Event date at risk"}
+          </p>
+          <p className="text-sm font-medium">
+            {feasibility.goal_title} · {feasibility.target_date}
+          </p>
+          <p className="text-muted text-xs mt-1 leading-relaxed">{feasibility.note}</p>
+        </div>
+      )}
 
       {/* Week skeleton editor */}
       <div className="bg-surface rounded-2xl p-4">

@@ -15,6 +15,7 @@ import {
   generatePlanDiffs,
   weeksBetween,
   mondayOnOrBefore,
+  assessEventFeasibility,
   type PeriodizationInput,
 } from "./periodization.js";
 
@@ -417,5 +418,56 @@ describe("generatePlanDiffs", () => {
     const allowed = new Set(["plans", "phases", "plan_weeks", "prescribed_sessions"]);
     const diffs = generatePlanDiffs(generateMacroPlan(baseInput()));
     diffs.forEach((d) => expect(allowed.has(d.entity_type)).toBe(true));
+  });
+});
+
+// ─── assessEventFeasibility (G5) ─────────────────────────────────────────────
+
+describe("assessEventFeasibility (G5)", () => {
+  const goal = { id: "g1", title: "Trail half marathon", target_date: "2026-10-31" };
+
+  it("plenty of runway + healthy volume → on_track", () => {
+    const r = assessEventFeasibility({
+      today: "2026-01-01",
+      goal,
+      gateClosed: false,
+      weeklyDistanceM: 20_000,
+    });
+    expect(r.status).toBe("on_track");
+    expect(r.weeks_needed).not.toBeNull();
+    expect(r.weeks_available).toBeGreaterThan(r.weeks_needed!);
+  });
+
+  it("gate closed near the date → projection starts from the gate cap and goes at_risk/infeasible", () => {
+    const r = assessEventFeasibility({
+      today: "2026-09-01",
+      goal,
+      gateClosed: true,
+      weeklyDistanceM: 20_000, // ignored: gate closed forces the cap as the starting point
+    });
+    expect(["at_risk", "infeasible"]).toContain(r.status);
+    expect(r.gate_closed).toBe(true);
+    expect(r.note).toContain("CLOSED");
+  });
+
+  it("no dated goal → no_dated_goal", () => {
+    const r = assessEventFeasibility({
+      today: "2026-01-01",
+      goal: null,
+      gateClosed: false,
+      weeklyDistanceM: 0,
+    });
+    expect(r.status).toBe("no_dated_goal");
+  });
+
+  it("date already passed → infeasible (zero weeks available)", () => {
+    const r = assessEventFeasibility({
+      today: "2026-11-15",
+      goal,
+      gateClosed: false,
+      weeklyDistanceM: 2_400,
+    });
+    expect(r.status).toBe("infeasible");
+    expect(r.weeks_available).toBe(0);
   });
 });

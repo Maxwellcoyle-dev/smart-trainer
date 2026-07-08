@@ -323,6 +323,25 @@ export function useCurrentPlan() {
   });
 }
 
+export interface EventFeasibility {
+  status: "on_track" | "at_risk" | "infeasible" | "no_dated_goal";
+  goal_id: string | null;
+  goal_title: string | null;
+  target_date: string | null;
+  weeks_available: number | null;
+  weeks_needed: number | null;
+  gate_closed: boolean;
+  note: string;
+}
+
+/** G5: feasibility of the primary dated run goal (ramp vs. calendar). */
+export function useFeasibility() {
+  return useQuery({
+    queryKey: ["plan", "feasibility"],
+    queryFn: () => api.get<EventFeasibility>("/plan/feasibility"),
+  });
+}
+
 export function useCreateGoal() {
   const qc = useQueryClient();
   return useMutation({
