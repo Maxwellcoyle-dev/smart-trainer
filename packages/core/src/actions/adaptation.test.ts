@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { runAdaptation, resolveAutonomy, selectWeekContext } from "./adaptation.js";
+import {
+  runAdaptation,
+  resolveAutonomy,
+  selectWeekContext,
+  findMissedSessions,
+  latestCompletedWeek,
+} from "./adaptation.js";
 import type { AdaptationContext, AdaptationEvent } from "../engine/adaptation.js";
 import type { SupabaseClient } from "../db.js";
 import type { PrescribedSession, InjuryFlag } from "../types.js";
@@ -183,5 +189,63 @@ describe("runAdaptation — autonomy branching", () => {
     expect(rec.proposals).toHaveLength(0);
     // job still finished (one insert, one status update)
     expect(rec.ai_job_runs).toHaveLength(1);
+  });
+});
+
+// ─── P29: pure rollover detectors ────────────────────────────────────────────
+
+describe("findMissedSessions (P29)", () => {
+  const plan = makePlan([
+    {
+      id: "w0",
+      start: "2026-06-15",
+      sessions: [
+        presc({ id: "done", plan_week_id: "w0", scheduled_date: "2026-06-15", status: "completed" }),
+        presc({ id: "old-miss", plan_week_id: "w0", scheduled_date: "2026-06-16" }),
+        presc({ id: "skipped", plan_week_id: "w0", scheduled_date: "2026-06-17", status: "skipped" }),
+        presc({ id: "deleted", plan_week_id: "w0", scheduled_date: "2026-06-18", deleted_at: "x" }),
+      ],
+    },
+    {
+      id: "w1",
+      start: "2026-06-22",
+      sessions: [
+        presc({ id: "new-miss", plan_week_id: "w1", scheduled_date: "2026-06-22" }),
+        presc({ id: "today", plan_week_id: "w1", scheduled_date: "2026-06-24" }),
+        presc({ id: "future", plan_week_id: "w1", scheduled_date: "2026-06-26" }),
+      ],
+    },
+  ]) as unknown as Parameters<typeof findMissedSessions>[0];
+
+  it("returns only past-dated planned sessions with no log, oldest first", () => {
+    const missed = findMissedSessions(plan, "2026-06-24");
+    expect(missed.map((s) => s.id)).toEqual(["old-miss", "new-miss"]);
+  });
+
+  it("a same-day session is not missed yet", () => {
+    const missed = findMissedSessions(plan, "2026-06-24");
+    expect(missed.find((s) => s.id === "today")).toBeUndefined();
+  });
+});
+
+describe("latestCompletedWeek (P29)", () => {
+  const plan = makePlan([
+    { id: "w0", start: "2026-06-15", sessions: [] },
+    { id: "w1", start: "2026-06-22", sessions: [] },
+    { id: "w2", start: "2026-06-29", sessions: [] },
+  ]) as unknown as Parameters<typeof latestCompletedWeek>[0];
+
+  it("returns the most recent fully-past week", () => {
+    // 2026-06-29: w0 ended 06-21, w1 ended 06-28 → w1 is the latest completed
+    expect(latestCompletedWeek(plan, "2026-06-29")?.id).toBe("w1");
+  });
+
+  it("a week is not complete on its own last day", () => {
+    // w1 ends 06-28 → on 06-28 only w0 is complete
+    expect(latestCompletedWeek(plan, "2026-06-28")?.id).toBe("w0");
+  });
+
+  it("null when no week has finished", () => {
+    expect(latestCompletedWeek(plan, "2026-06-20")).toBeNull();
   });
 });

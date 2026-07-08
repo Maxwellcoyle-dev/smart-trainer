@@ -75,7 +75,7 @@ export type AdaptationEvent =
       raised_flags: InjuryFlag[];
     }
   | { type: "session.missed"; prescribed_session_id: string }
-  | { type: "week.completed"; week_index: number }
+  | { type: "week.completed"; week_index: number; week_id?: string }
   | { type: "phase.ending"; phase_index: number; phase_id?: string };
 
 /** The current plan week — only its id, index, start and targets are needed. */

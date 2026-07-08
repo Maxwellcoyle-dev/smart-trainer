@@ -8,7 +8,8 @@ import {
   logCheckIn,
   getClimbPlaces,
   runAdaptation,
-  checkPhaseEnding,
+  runDailyChecks,
+  type RunAdaptationResult,
   RunSurfaceSchema,
   ClimbStyleSchema,
   ClimbEnvironmentSchema,
@@ -179,27 +180,39 @@ logsRouter.post("/checkin", zValidator("json", CheckInBody), async (c) => {
     raised.length > 0
       ? await fireAdaptation(db, userId, { type: "checkin.submitted", raised_flags: raised })
       : null;
-  // G5: the daily check-in doubles as the phase-rollover tick (no scheduler in
-  // v1). checkPhaseEnding fires at most once per phase; error-isolated like
-  // every hook — a failure never fails the check-in.
-  let phase_ending: AdaptationSummary | null = null;
+  // G5/P29: the daily check-in is the system's heartbeat (no scheduler in v1).
+  // One plan load drives all rollover detectors — missed sessions, week
+  // completed, phase ending — each once-per-entity (ai_job_runs dedupe) and
+  // error-isolated: a detector failure never fails the check-in.
+  let daily: {
+    missed: AdaptationSummary[];
+    week_completed: AdaptationSummary | null;
+    phase_ending: AdaptationSummary | null;
+  } = { missed: [], week_completed: null, phase_ending: null };
   try {
-    const r = await checkPhaseEnding(db, userId);
-    if (r) {
-      phase_ending = {
-        outcome: r.outcome,
-        action_type: r.decision.action_type,
-        tier: r.decision.tier,
-        notify: r.notify ?? r.decision.rationale,
-        log_id: r.log_id,
-        proposal_id: r.proposal?.id,
-      };
-    }
+    const r = await runDailyChecks(db, userId);
+    daily = {
+      missed: r.missed.map(summarize),
+      week_completed: r.week_completed ? summarize(r.week_completed) : null,
+      phase_ending: r.phase_ending ? summarize(r.phase_ending) : null,
+    };
   } catch {
-    phase_ending = null;
+    /* isolated */
   }
-  return c.json({ ...result, adaptation, phase_ending }, 201);
+  return c.json({ ...result, adaptation, daily }, 201);
 });
+
+/** Compact an adaptation run for the client. */
+function summarize(r: RunAdaptationResult): AdaptationSummary {
+  return {
+    outcome: r.outcome,
+    action_type: r.decision.action_type,
+    tier: r.decision.tier,
+    notify: r.notify ?? r.decision.rationale,
+    log_id: r.log_id,
+    proposal_id: r.proposal?.id,
+  };
+}
 
 logsRouter.get("/climb/places", async (c) => {
   const db = c.get("supabase");

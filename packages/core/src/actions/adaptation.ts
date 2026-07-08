@@ -56,7 +56,7 @@ export function resolveAutonomy(
 
 // ─── Current-week context selection (pure) ────────────────────────────────────
 
-type LoadedPlan = Plan & {
+export type LoadedPlan = Plan & {
   phases: (Phase & {
     plan_weeks: (PlanWeek & { prescribed_sessions: PrescribedSession[] })[];
   })[];
@@ -245,12 +245,16 @@ export async function runAdaptation(
   opts: { context?: AdaptationContext; autonomy?: Autonomy } = {}
 ): Promise<RunAdaptationResult> {
   const today = new Date().toISOString().slice(0, 10);
-  // phase.ending runs are one-shot per phase — key the audit row so
-  // checkPhaseEnding can dedupe against it.
+  // Rollover events are one-shot per entity — key the audit row so the
+  // check* detectors can dedupe against it (P29/G5 heartbeat pattern).
   const trigger =
     event.type === "phase.ending"
       ? `phase.ending:${event.phase_id ?? event.phase_index}`
-      : event.type;
+      : event.type === "week.completed"
+        ? `week.completed:${event.week_id ?? event.week_index}`
+        : event.type === "session.missed"
+          ? `session.missed:${event.prescribed_session_id}`
+          : event.type;
   const jobId = await startJob(db, userId, "adaptation", trigger);
 
   try {
@@ -321,10 +325,10 @@ export async function runAdaptation(
       };
     }
 
-    // A major with no concrete diffs (week/phase rollover) has nothing to apply
-    // yet — the scoped re-generation pipeline (G3) isn't built. Surface it as a
-    // notification rather than queuing a dead, un-actionable proposal. (These
-    // events are not emitted in v1; this guard keeps the path safe if they are.)
+    // A major with no concrete diffs (e.g. week.completed → generate_week) has
+    // nothing to apply yet — the scoped re-generation pipeline isn't built.
+    // Surface it as a notification rather than queuing a dead, un-actionable
+    // proposal. (P29 emits these from the daily heartbeat.)
     if (decision.diffs.length === 0) {
       await finishJob(db, jobId, "succeeded", `notify (no diff): ${decision.action_type}`);
       return {
@@ -377,10 +381,12 @@ export async function runAdaptation(
  */
 export async function checkPhaseEnding(
   db: SupabaseClient,
-  userId: string
+  userId: string,
+  preloaded?: LoadedPlan | null
 ): Promise<RunAdaptationResult | null> {
   const today = new Date().toISOString().slice(0, 10);
-  const plan = (await getCurrentPlan(db, userId)) as LoadedPlan | null;
+  const plan =
+    preloaded !== undefined ? preloaded : ((await getCurrentPlan(db, userId)) as LoadedPlan | null);
   if (!plan) return null;
 
   for (const phase of plan.phases ?? []) {
@@ -388,13 +394,7 @@ export async function checkPhaseEnding(
     const last = weeks[weeks.length - 1];
     if (!last || !weekContains(last, today)) continue;
 
-    const { data } = await db
-      .from("ai_job_runs")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("trigger_event", `phase.ending:${phase.id}`)
-      .limit(1);
-    if (data && data.length > 0) return null; // already handled
+    if (await hasJobRun(db, userId, `phase.ending:${phase.id}`)) return null;
 
     return runAdaptation(db, userId, {
       type: "phase.ending",
@@ -403,4 +403,139 @@ export async function checkPhaseEnding(
     });
   }
   return null;
+}
+
+// ─── P29: missed-session + week-completed detection (the daily heartbeat) ────
+
+/** Has an adaptation job already run for this dedupe key? */
+async function hasJobRun(db: SupabaseClient, userId: string, trigger: string): Promise<boolean> {
+  const { data } = await db
+    .from("ai_job_runs")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("trigger_event", trigger)
+    .limit(1);
+  return !!data && data.length > 0;
+}
+
+/**
+ * Pure: prescribed sessions that are past-dated, still `planned`, and have no
+ * log against them — i.e. silently skipped. Oldest first.
+ */
+export function findMissedSessions(plan: LoadedPlan, today: string): PrescribedSession[] {
+  return flattenWeeks(plan)
+    .flatMap((w) => w.prescribed_sessions ?? [])
+    .filter(
+      (s) =>
+        s.deleted_at == null &&
+        s.status === "planned" &&
+        s.logged_session_id == null &&
+        s.scheduled_date != null &&
+        s.scheduled_date < today
+    )
+    .sort((a, b) => a.scheduled_date!.localeCompare(b.scheduled_date!));
+}
+
+/** Pure: the most recent plan week whose 7 days are fully in the past. */
+export function latestCompletedWeek(plan: LoadedPlan, today: string): PlanWeek | null {
+  const done = flattenWeeks(plan).filter(
+    (w) => w.start_date != null && addDays(w.start_date, 6) < today
+  );
+  if (done.length === 0) return null;
+  return done.sort((a, b) => b.week_index - a.week_index)[0];
+}
+
+/** Newest-first cap so a long gap can't flood the queue in one check-in. */
+export const MISSED_SESSIONS_PER_CHECK = 3;
+
+/**
+ * Fire `session.missed` for silently skipped sessions — at most
+ * MISSED_SESSIONS_PER_CHECK per call (most recent first), exactly once per
+ * session (deduped via ai_job_runs `session.missed:<id>`).
+ */
+export async function checkMissedSessions(
+  db: SupabaseClient,
+  userId: string,
+  preloaded?: LoadedPlan | null
+): Promise<RunAdaptationResult[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const plan =
+    preloaded !== undefined ? preloaded : ((await getCurrentPlan(db, userId)) as LoadedPlan | null);
+  if (!plan) return [];
+
+  const missed = findMissedSessions(plan, today).slice(-MISSED_SESSIONS_PER_CHECK);
+  const results: RunAdaptationResult[] = [];
+  for (const s of missed) {
+    if (await hasJobRun(db, userId, `session.missed:${s.id}`)) continue;
+    results.push(
+      await runAdaptation(db, userId, { type: "session.missed", prescribed_session_id: s.id })
+    );
+  }
+  return results;
+}
+
+/**
+ * Fire `week.completed` for the most recently finished plan week, once per
+ * week (deduped via `week.completed:<week_id>`). The classifier currently
+ * yields a diff-less MAJOR (generate_week), which runAdaptation surfaces as a
+ * notification — the scoped re-generation pipeline plugs in here later.
+ */
+export async function checkWeekCompleted(
+  db: SupabaseClient,
+  userId: string,
+  preloaded?: LoadedPlan | null
+): Promise<RunAdaptationResult | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const plan =
+    preloaded !== undefined ? preloaded : ((await getCurrentPlan(db, userId)) as LoadedPlan | null);
+  if (!plan) return null;
+
+  const week = latestCompletedWeek(plan, today);
+  if (!week) return null;
+  if (await hasJobRun(db, userId, `week.completed:${week.id}`)) return null;
+
+  return runAdaptation(db, userId, {
+    type: "week.completed",
+    week_index: week.week_index,
+    week_id: week.id,
+  });
+}
+
+// ─── runDailyChecks: the whole heartbeat in one call ──────────────────────────
+
+export interface DailyChecksResult {
+  missed: RunAdaptationResult[];
+  week_completed: RunAdaptationResult | null;
+  phase_ending: RunAdaptationResult | null;
+}
+
+/**
+ * Run all rollover detectors off one plan load: missed sessions → week
+ * completed → phase ending. Each check is error-isolated so one failure never
+ * blocks the others (or the check-in that triggered the heartbeat).
+ */
+export async function runDailyChecks(
+  db: SupabaseClient,
+  userId: string
+): Promise<DailyChecksResult> {
+  const plan = (await getCurrentPlan(db, userId).catch(() => null)) as LoadedPlan | null;
+  const result: DailyChecksResult = { missed: [], week_completed: null, phase_ending: null };
+  if (!plan) return result;
+
+  try {
+    result.missed = await checkMissedSessions(db, userId, plan);
+  } catch {
+    /* isolated */
+  }
+  try {
+    result.week_completed = await checkWeekCompleted(db, userId, plan);
+  } catch {
+    /* isolated */
+  }
+  try {
+    result.phase_ending = await checkPhaseEnding(db, userId, plan);
+  } catch {
+    /* isolated */
+  }
+  return result;
 }
