@@ -361,7 +361,7 @@ export function useCreateGoal() {
 export function useUpdateGoal() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; title?: string; status?: string; priority?: number; notes?: string | null }) =>
+    mutationFn: ({ id, ...body }: { id: string; title?: string; status?: string; priority?: number; notes?: string | null; target_date?: string | null }) =>
       api.patch<Goal>(`/plan/goals/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["plan"] }),
   });

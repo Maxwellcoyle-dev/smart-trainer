@@ -67,6 +67,7 @@ export function PlanPage() {
   const [goalDate, setGoalDate] = useState("");
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [editDate, setEditDate] = useState("");
 
   function submitGoal() {
     const title = goalTitle.trim();
@@ -80,12 +81,16 @@ export function PlanPage() {
   function startEdit(g: Goal) {
     setEditingGoalId(g.id);
     setEditTitle(g.title);
+    setEditDate(g.target_date ?? "");
   }
 
   function saveEdit(id: string) {
     const title = editTitle.trim();
     if (!title) return;
-    updateGoal.mutate({ id, title }, { onSuccess: () => setEditingGoalId(null) });
+    updateGoal.mutate(
+      { id, title, target_date: editDate || null },
+      { onSuccess: () => setEditingGoalId(null) }
+    );
   }
 
   const [planName, setPlanName] = useState("");
@@ -311,13 +316,19 @@ export function PlanPage() {
             {goals.map((g) => (
               <div key={g.id} className="bg-surface2 rounded-xl px-3 py-2 space-y-1">
                 {editingGoalId === g.id ? (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <input
                       autoFocus
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") saveEdit(g.id); if (e.key === "Escape") setEditingGoalId(null); }}
-                      className="flex-1 bg-surface rounded-lg px-2 py-1 text-sm outline-none"
+                      className="flex-1 min-w-[10rem] bg-surface rounded-lg px-2 py-1 text-sm outline-none"
+                    />
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className="bg-surface rounded-lg px-2 py-1 text-sm outline-none"
                     />
                     <button
                       onClick={() => saveEdit(g.id)}
